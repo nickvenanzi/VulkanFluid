@@ -12,11 +12,16 @@ endif
 VulkanTest: main.cpp
 	g++ $(CFLAGS) -o VulkanTest main.cpp $(LDFLAGS)
 
-.PHONY: test clean
+.PHONY: test clean shaders
 
-test: VulkanTest
+shaders:
+	cd shaders && ./compile.sh
+
+test: shaders VulkanTest
 	./VulkanTest
 
 clean: 
 	rm -f VulkanTest
+	rm -f shaders/*.spv
+
 
