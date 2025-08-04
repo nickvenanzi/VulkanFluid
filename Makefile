@@ -9,19 +9,34 @@ else
     CFLAGS += -DNDEBUG -O2
 endif
 
-VulkanTest: main.cpp
-	g++ $(CFLAGS) -o VulkanTest main.cpp $(LDFLAGS)
+# Find all .cpp files recursively starting from current directory
+SRCS := $(shell find . -name '*.cpp')
 
-.PHONY: test clean shaders
+# Create corresponding object files replacing .cpp with .o
+OBJS := $(SRCS:.cpp=.o)
+
+TARGET = App
+
+all: shaders $(TARGET)
+
+$(TARGET): $(OBJS)
+	g++ $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Compile rule for .o from .cpp
+%.o: %.cpp
+	@echo "Compiling $< ..."
+	g++ $(CFLAGS) -c $< -o $@
+
+.PHONY: all test clean shaders
 
 shaders:
 	cd shaders && ./compile.sh
 
-test: shaders VulkanTest
-	./VulkanTest
+test: all
+	./$(TARGET)
 
 clean: 
-	rm -f VulkanTest
+	rm -f $(OBJS) $(TARGET)
 	rm -f shaders/*.spv
 
 
