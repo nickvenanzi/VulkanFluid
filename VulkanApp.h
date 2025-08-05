@@ -72,7 +72,7 @@ private:
 
     void initModel();
     void addCube(float size, glm::vec3 position, glm::vec3 color);
-    void constructSurface(const std::array<float, 8> &phis);
+    void constructSurface(const std::array<float, 8> &phis, const glm::vec3 cubePosition);
 
     void initVulkan();
     void mainLoop();
