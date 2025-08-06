@@ -391,7 +391,7 @@ void VulkanApp::addCube(float size, glm::vec3 position, glm::vec3 color)
                 float x = position.x + offset[i];
                 float y = position.y + offset[j];
                 float z = position.z + offset[k];
-                vertices[index] = {{x, y, z}, color};
+                vertices[index] = {{x, y, z}, glm::vec3(0.0f), color};
             }
         }
     }
@@ -402,6 +402,16 @@ void VulkanApp::addCube(float size, glm::vec3 position, glm::vec3 color)
     for (uint16_t idx = 0; idx < cubeIndices.size(); idx++)
     {
         indices[indicesSize + idx] = cubeIndices[idx] + startIndex;
+    }
+
+    // add normals
+    for (uint16_t idx = indicesSize; idx < indices.size(); idx += 3)
+    {
+        std::array<Vertex, 3> triangle = {vertices[idx], vertices[idx + 1], vertices[idx + 2]};
+        glm::vec3 normal = glm::normalize(glm::cross(triangle[1].pos - triangle[0].pos, triangle[2].pos - triangle[0].pos));
+        vertices[idx].normal = normal;
+        vertices[idx + 1].normal = normal;
+        vertices[idx + 2].normal = normal;
     }
 }
 
@@ -446,9 +456,10 @@ void VulkanApp::constructSurface(const std::array<float, 8> &phis, const glm::ve
         uint32_t indicesSize = indices.size();
         vertices.resize(startIndex + 3);
         indices.resize(indicesSize + 3);
+        glm::vec3 normal = glm::normalize(glm::cross(boundaryVertices[triangle[1]] - boundaryVertices[triangle[0]], boundaryVertices[triangle[2]] - boundaryVertices[triangle[0]]));
         for (uint32_t j = 0; j < 3; j++)
         {
-            vertices[startIndex + j] = {boundaryVertices[triangle[j]] + cubePosition, SURFACE_COLOR};
+            vertices[startIndex + j] = {boundaryVertices[triangle[j]] + cubePosition, normal, SURFACE_COLOR};
             indices[indicesSize + j] = startIndex + j;
         }
     }
