@@ -1,4 +1,5 @@
 #include "VulkanApp.h"
+
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <iostream>
@@ -19,13 +20,6 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
-static const glm::vec3 WATER_COLOR = {0.0f, 0.0f, 1.0f};
-static const glm::vec3 AIR_COLOR = {0.5f, 0.5f, 0.5f};
-static const glm::vec3 SURFACE_COLOR = {1.0f, 1.0f, 1.0f};
-static const float CELL_WIDTH = 1.0f;
-
-#define compareSign(a, b) (reinterpret_cast<const uint32_t &>(a) ^ reinterpret_cast<const uint32_t &>(b)) & 0x80000000
-
 const std::vector<const char *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"};
 
@@ -43,283 +37,10 @@ struct UniformBufferObject
     alignas(16) glm::mat4 proj;
 };
 
-std::vector<uint16_t> cubeIndices = {
-    4, 5, 7, 7, 6, 4, // Front face (+Z)
-    0, 2, 3, 3, 1, 0, // Back face (-Z)
-    0, 4, 6, 6, 2, 0, // Left face (-X)
-    1, 3, 7, 7, 5, 1, // Right face (+X)
-    2, 6, 7, 7, 3, 2, // Top face (+Y)
-    0, 1, 5, 5, 4, 0  // Bottom face (-Y)
-};
-
-const float cubeSize = 0.1;
-
-#define Triple std::array<uint32_t, 3>
-#define MarchingCube std::vector<Triple>
-
-const MarchingCube marchingCubeLookup[256] = {
-    {},                                               // 0
-    {{0, 1, 4}},                                      // 1
-    {{0, 2, 5}},                                      // 2
-    {{1, 2, 4}, {2, 4, 5}},                           // 3
-    {{1, 3, 6}},                                      // 4
-    {{0, 3, 4}, {3, 4, 6}},                           // 5
-    {{0, 2, 5}, {1, 3, 6}},                           // 6
-    {{2, 3, 4}, {2, 4, 5}, {3, 4, 6}},                // 7
-    {{2, 3, 7}},                                      // 8
-    {{0, 1, 4}, {2, 3, 7}},                           // 9
-    {{0, 3, 5}, {3, 5, 7}},                           // 10
-    {{1, 3, 4}, {3, 4, 5}, {3, 5, 7}},                // 11
-    {{1, 2, 6}, {2, 6, 7}},                           // 12
-    {{0, 2, 4}, {2, 4, 6}, {2, 6, 7}},                // 13
-    {{1, 6, 7}, {0, 1, 7}, {0, 5, 7}},                // 14
-    {{4, 5, 6}, {5, 6, 7}},                           // 15
-    {{4, 8, 9}},                                      // 16
-    {{0, 1, 8}, {1, 8, 9}},                           // 17
-    {{0, 2, 5}, {4, 8, 9}},                           // 18
-    {{1, 2, 5}, {1, 5, 8}, {1, 8, 9}},                // 19
-    {{1, 3, 6}, {4, 8, 9}},                           // 20
-    {{0, 3, 6}, {0, 6, 9}, {0, 8, 9}},                // 21
-    {{0, 2, 5}, {1, 3, 6}, {4, 8, 9}},                // 22
-    {{2, 3, 6}, {2, 6, 9}, {2, 8, 9}, {2, 5, 8}},     // 23
-    {{2, 3, 7}, {4, 8, 9}},                           // 24
-    {{0, 1, 8}, {1, 8, 9}, {2, 3, 7}},                // 25
-    {{0, 3, 5}, {3, 5, 7}, {4, 8, 9}},                // 26
-    {{1, 3, 9}, {3, 7, 9}, {7, 8, 9}, {5, 7, 8}},     // 27
-    {{1, 2, 6}, {2, 6, 7}, {4, 8, 9}},                // 28
-    {{2, 6, 7}, {2, 6, 8}, {6, 8, 9}, {0, 2, 8}},     // 29
-    {{1, 6, 7}, {0, 1, 7}, {0, 5, 7}, {4, 8, 9}},     // 30
-    {{6, 7, 9}, {7, 8, 9}, {5, 7, 8}},                // 31
-    {{5, 8, 10}},                                     // 32
-    {{0, 1, 4}, {5, 8, 10}},                          // 33
-    {{0, 2, 8}, {2, 8, 10}},                          // 34
-    {{1, 2, 4}, {2, 4, 8}, {2, 8, 10}},               // 35
-    {{1, 3, 6}, {5, 8, 10}},                          // 36
-    {{0, 3, 4}, {3, 4, 6}, {5, 8, 10}},               // 37
-    {{0, 2, 8}, {2, 8, 10}, {1, 3, 6}},               // 38
-    {{2, 3, 6}, {2, 4, 6}, {2, 4, 8}, {2, 8, 10}},    // 39
-    {{2, 3, 7}, {5, 8, 10}},                          // 40
-    {{0, 1, 4}, {2, 3, 7}, {5, 8, 10}},               // 41
-    {{0, 3, 7}, {0, 7, 10}, {0, 8, 10}},              // 42
-    {{1, 3, 7}, {1, 7, 10}, {1, 8, 10}, {1, 4, 8}},   // 43
-    {{1, 2, 6}, {2, 6, 7}, {5, 8, 10}},               // 44
-    {{0, 2, 4}, {2, 4, 6}, {2, 6, 7}, {5, 8, 10}},    // 45
-    {{0, 1, 8}, {1, 8, 10}, {1, 6, 10}, {6, 7, 10}},  // 46
-    {{4, 6, 8}, {6, 8, 10}, {6, 7, 10}},              // 47
-    {{4, 5, 9}, {5, 9, 10}},                          // 48
-    {{0, 1, 9}, {0, 5, 9}, {5, 9, 10}},               // 49
-    {{0, 2, 10}, {0, 4, 10}, {4, 9, 10}},             // 50
-    {{1, 2, 9}, {2, 9, 10}},                          // 51
-    {{4, 5, 9}, {5, 9, 10}, {1, 3, 6}},               // 52
-    {{0, 3, 6}, {0, 6, 9}, {0, 5, 10}, {0, 9, 10}},   // 53
-    {{0, 2, 10}, {0, 4, 10}, {4, 9, 10}, {1, 3, 6}},  // 54
-    {{2, 3, 10}, {3, 6, 10}, {6, 9, 10}},             // 55
-    {{4, 5, 9}, {5, 9, 10}, {2, 3, 7}},               // 56
-    {{0, 1, 9}, {0, 5, 9}, {5, 9, 10}, {2, 3, 7}},    // 57
-    {{0, 4, 9}, {0, 3, 9}, {3, 9, 10}, {3, 7, 10}},   // 58
-    {{1, 3, 9}, {3, 7, 9}, {7, 9, 10}},               // 59
-    {{1, 2, 6}, {2, 6, 7}, {4, 5, 9}, {5, 9, 10}},    // 60
-    {{6, 7, 9}, {7, 9, 10}, {0, 2, 5}},               // 61
-    {{6, 7, 9}, {7, 9, 10}, {0, 1, 4}},               // 62
-    {{6, 7, 9}, {7, 9, 10}},                          // 63
-    {{6, 9, 11}},                                     // 64
-    {{0, 1, 4}, {6, 9, 11}},                          // 65
-    {{0, 2, 5}, {6, 9, 11}},                          // 66
-    {{1, 2, 4}, {2, 4, 5}, {6, 9, 11}},               // 67
-    {{1, 3, 9}, {3, 9, 11}},                          // 68
-    {{0, 3, 4}, {3, 4, 9}, {3, 9, 11}},               // 69
-    {{1, 3, 9}, {3, 9, 11}, {0, 2, 5}},               // 70
-    {{2, 4, 5}, {2, 4, 11}, {4, 9, 11}, {2, 3, 11}},  // 71
-    {{2, 3, 7}, {6, 9, 11}},                          // 72
-    {{0, 1, 4}, {2, 3, 7}, {6, 9, 11}},               // 73
-    {{0, 3, 5}, {3, 5, 7}, {6, 9, 11}},               // 74
-    {{1, 3, 4}, {3, 4, 5}, {3, 5, 7}, {6, 9, 11}},    // 75
-    {{1, 2, 7}, {1, 7, 11}, {1, 9, 11}},              // 76
-    {{0, 4, 9}, {0, 9, 11}, {0, 7, 11}, {0, 2, 7}},   // 77
-    {{0, 1, 9}, {0, 5, 9}, {5, 9, 11}, {5, 7, 11}},   // 78
-    {{4, 5, 9}, {5, 9, 11}, {5, 7, 11}},              // 79
-    {{4, 6, 8}, {6, 8, 11}},                          // 80
-    {{0, 1, 8}, {1, 6, 8}, {6, 8, 11}},               // 81
-    {{4, 6, 8}, {6, 8, 11}, {0, 2, 5}},               // 82
-    {{1, 6, 11}, {1, 2, 11}, {2, 5, 11}, {5, 8, 11}}, // 83
-    {{1, 3, 11}, {1, 4, 11}, {4, 8, 11}},             // 84
-    {{0, 3, 8}, {3, 8, 11}},                          // 85
-    {{1, 3, 11}, {1, 4, 11}, {4, 8, 11}, {0, 2, 5}},  // 86
-    {{2, 3, 11}, {2, 5, 11}, {5, 8, 11}},             // 87
-    {{4, 6, 8}, {6, 8, 11}, {2, 3, 7}},               // 88
-    {{0, 1, 8}, {1, 6, 8}, {6, 8, 11}, {2, 3, 7}},    // 89
-    {{0, 3, 5}, {3, 5, 7}, {4, 6, 8}, {6, 8, 11}},    // 90
-    {{5, 7, 8}, {7, 8, 11}, {1, 3, 6}},               // 91
-    {{2, 7, 11}, {1, 2, 11}, {1, 8, 11}, {1, 4, 8}},  // 92
-    {{0, 2, 8}, {2, 7, 8}, {7, 8, 11}},               // 93
-    {{5, 7, 8}, {7, 8, 11}, {0, 1, 4}},               // 94
-    {{5, 7, 8}, {7, 8, 11}},                          // 95
-    {{5, 8, 10}, {6, 9, 11}},                         // 96
-    {{0, 1, 4}, {5, 8, 10}, {6, 9, 11}},              // 97
-    {{0, 2, 8}, {2, 8, 10}, {6, 9, 11}},              // 98
-    {{1, 2, 4}, {2, 4, 8}, {2, 8, 10}, {6, 9, 11}},   // 99
-    {{1, 3, 9}, {3, 9, 11}, {5, 8, 10}},              // 100
-    {{0, 3, 4}, {3, 4, 9}, {3, 9, 11}, {5, 8, 10}},   // 101
-    {{1, 3, 9}, {3, 9, 11}, {0, 2, 8}, {2, 8, 10}},   // 102
-    {{2, 3, 10}, {3, 10, 11}, {4, 8, 9}},             // 103
-    {{2, 3, 7}, {5, 8, 10}, {6, 9, 11}},              // 104
-    {{0, 1, 4}, {2, 3, 7}, {5, 8, 10}, {6, 9, 11}},   // 105
-    {{0, 3, 7}, {0, 7, 10}, {0, 8, 10}, {6, 9, 11}},  // 106
-    {{1, 3, 6}, {4, 8, 9}, {7, 10, 11}},              // 107
-    {{1, 2, 7}, {1, 7, 11}, {1, 9, 11}, {5, 8, 10}},  // 108
-    {{0, 2, 5}, {4, 8, 9}, {7, 10, 11}},              // 109
-    {{0, 1, 8}, {1, 8, 9}, {7, 10, 11}},              // 110
-    {{4, 8, 9}, {7, 10, 11}},                         // 111
-    {{4, 6, 11}, {4, 10, 11}, {4, 5, 10}},            // 112
-    {{0, 1, 6}, {0, 6, 11}, {0, 10, 11}, {0, 5, 10}}, // 113
-    {{0, 4, 6}, {0, 2, 6}, {2, 6, 11}, {2, 10, 11}},  // 114
-    {{1, 2, 6}, {2, 6, 11}, {2, 10, 11}},             // 115
-    {{1, 3, 11}, {1, 5, 11}, {1, 4, 5}, {5, 10, 11}}, // 116
-    {{0, 3, 5}, {3, 5, 10}, {3, 10, 11}},             // 117
-    {{2, 3, 10}, {3, 10, 11}, {0, 1, 4}},             // 118
-    {{2, 3, 10}, {3, 10, 11}},                        // 119
-    {{4, 6, 11}, {4, 10, 11}, {4, 5, 10}, {2, 3, 7}}, // 120
-    {{0, 2, 5}, {1, 3, 6}, {7, 10, 11}},              // 121
-    {{0, 3, 4}, {3, 4, 6}, {7, 10, 11}},              // 122
-    {{1, 3, 6}, {7, 10, 11}},                         // 123
-    {{1, 2, 4}, {2, 4, 5}, {7, 10, 11}},              // 124
-    {{0, 2, 5}, {7, 10, 11}},                         // 125
-    {{0, 1, 4}, {7, 10, 11}},                         // 126
-    {{7, 10, 11}},                                    // 127
-    {{7, 10, 11}},                                    // 128
-    {{0, 1, 4}, {7, 10, 11}},                         // 129
-    {{0, 2, 5}, {7, 10, 11}},                         // 130
-    {{1, 2, 4}, {2, 4, 5}, {7, 10, 11}},              // 131
-    {{1, 3, 6}, {7, 10, 11}},                         // 132
-    {{0, 3, 4}, {3, 4, 6}, {7, 10, 11}},              // 133
-    {{0, 2, 5}, {1, 3, 6}, {7, 10, 11}},              // 134
-    {{2, 3, 4}, {2, 4, 5}, {3, 4, 6}, {7, 10, 11}},   // 135
-    {{2, 3, 10}, {3, 10, 11}},                        // 136
-    {{2, 3, 10}, {3, 10, 11}, {0, 1, 4}},             // 137
-    {{0, 3, 5}, {3, 5, 10}, {3, 10, 11}},             // 138
-    {{1, 3, 11}, {1, 5, 11}, {1, 4, 5}, {5, 10, 11}}, // 139
-    {{1, 2, 6}, {2, 6, 11}, {2, 10, 11}},             // 140
-    {{0, 4, 6}, {0, 2, 6}, {2, 6, 11}, {2, 10, 11}},  // 141
-    {{0, 1, 6}, {0, 6, 11}, {0, 10, 11}, {0, 5, 10}}, // 142
-    {{4, 6, 11}, {4, 10, 11}, {4, 5, 10}},            // 143
-    {{4, 8, 9}, {7, 10, 11}},                         // 144
-    {{0, 1, 8}, {1, 8, 9}, {7, 10, 11}},              // 145
-    {{0, 2, 5}, {4, 8, 9}, {7, 10, 11}},              // 146
-    {{1, 2, 5}, {1, 5, 8}, {1, 8, 9}, {7, 10, 11}},   // 147
-    {{1, 3, 6}, {4, 8, 9}, {7, 10, 11}},              // 148
-    {{0, 3, 6}, {0, 6, 9}, {0, 8, 9}, {7, 10, 11}},   // 149
-    {{0, 2, 5}, {1, 3, 6}, {4, 8, 9}, {7, 10, 11}},   // 150
-    {{2, 3, 7}, {5, 8, 10}, {6, 9, 11}},              // 151
-    {{2, 3, 10}, {3, 10, 11}, {4, 8, 9}},             // 152
-    {{0, 1, 8}, {1, 8, 9}, {2, 3, 10}, {3, 10, 11}},  // 153
-    {{0, 3, 5}, {3, 5, 10}, {3, 10, 11}, {4, 8, 9}},  // 154
-    {{1, 3, 9}, {3, 9, 11}, {5, 8, 10}},              // 155
-    {{1, 2, 6}, {2, 6, 11}, {2, 10, 11}, {4, 8, 9}},  // 156
-    {{0, 2, 8}, {2, 8, 10}, {6, 9, 11}},              // 157
-    {{0, 1, 4}, {5, 8, 10}, {6, 9, 11}},              // 158
-    {{5, 8, 10}, {6, 9, 11}},                         // 159
-    {{5, 7, 8}, {7, 8, 11}},                          // 160
-    {{5, 7, 8}, {7, 8, 11}, {0, 1, 4}},               // 161
-    {{0, 2, 8}, {2, 7, 8}, {7, 8, 11}},               // 162
-    {{2, 7, 11}, {1, 2, 11}, {1, 8, 11}, {1, 4, 8}},  // 163
-    {{5, 7, 8}, {7, 8, 11}, {1, 3, 6}},               // 164
-    {{0, 3, 4}, {3, 4, 6}, {5, 7, 8}, {7, 8, 11}},    // 165
-    {{0, 2, 8}, {2, 7, 8}, {7, 8, 11}, {1, 3, 6}},    // 166
-    {{4, 6, 8}, {6, 8, 11}, {2, 3, 7}},               // 167
-    {{2, 3, 11}, {2, 5, 11}, {5, 8, 11}},             // 168
-    {{2, 3, 11}, {2, 5, 11}, {5, 8, 11}, {0, 1, 4}},  // 169
-    {{0, 3, 8}, {3, 8, 11}},                          // 170
-    {{1, 3, 11}, {1, 4, 11}, {4, 8, 11}},             // 171
-    {{1, 6, 11}, {1, 2, 11}, {2, 5, 11}, {5, 8, 11}}, // 172
-    {{4, 6, 8}, {6, 8, 11}, {0, 2, 5}},               // 173
-    {{0, 1, 8}, {1, 6, 8}, {6, 8, 11}},               // 174
-    {{4, 6, 8}, {6, 8, 11}},                          // 175
-    {{4, 5, 9}, {5, 9, 11}, {5, 7, 11}},              // 176
-    {{0, 1, 9}, {0, 5, 9}, {5, 9, 11}, {5, 7, 11}},   // 177
-    {{0, 4, 9}, {0, 9, 11}, {0, 7, 11}, {0, 2, 7}},   // 178
-    {{1, 2, 7}, {1, 7, 11}, {1, 9, 11}},              // 179
-    {{4, 5, 9}, {5, 9, 11}, {5, 7, 11}, {1, 3, 6}},   // 180
-    {{0, 3, 5}, {3, 5, 7}, {6, 9, 11}},               // 181
-    {{0, 1, 4}, {2, 3, 7}, {6, 9, 11}},               // 182
-    {{2, 3, 7}, {6, 9, 11}},                          // 183
-    {{2, 4, 5}, {2, 4, 11}, {4, 9, 11}, {2, 3, 11}},  // 184
-    {{1, 3, 9}, {3, 9, 11}, {0, 2, 5}},               // 185
-    {{0, 3, 4}, {3, 4, 9}, {3, 9, 11}},               // 186
-    {{1, 3, 9}, {3, 9, 11}},                          // 187
-    {{1, 2, 4}, {2, 4, 5}, {6, 9, 11}},               // 188
-    {{0, 2, 5}, {6, 9, 11}},                          // 189
-    {{0, 1, 4}, {6, 9, 11}},                          // 190
-    {{6, 9, 11}},                                     // 191
-    {{6, 7, 9}, {7, 9, 10}},                          // 192
-    {{6, 7, 9}, {7, 9, 10}, {0, 1, 4}},               // 193
-    {{6, 7, 9}, {7, 9, 10}, {0, 2, 5}},               // 194
-    {{1, 2, 4}, {2, 4, 5}, {6, 7, 9}, {7, 9, 10}},    // 195
-    {{1, 3, 9}, {3, 7, 9}, {7, 9, 10}},               // 196
-    {{0, 4, 9}, {0, 3, 9}, {3, 9, 10}, {3, 7, 10}},   // 197
-    {{1, 3, 9}, {3, 7, 9}, {7, 9, 10}, {0, 2, 5}},    // 198
-    {{4, 5, 9}, {5, 9, 10}, {2, 3, 7}},               // 199
-    {{2, 3, 10}, {3, 6, 10}, {6, 9, 10}},             // 200
-    {{2, 3, 10}, {3, 6, 10}, {6, 9, 10}, {0, 1, 4}},  // 201
-    {{0, 3, 6}, {0, 6, 9}, {0, 5, 10}, {0, 9, 10}},   // 202
-    {{4, 5, 9}, {5, 9, 10}, {1, 3, 6}},               // 203
-    {{1, 2, 9}, {2, 9, 10}},                          // 204
-    {{0, 2, 10}, {0, 4, 10}, {4, 9, 10}},             // 205
-    {{0, 1, 9}, {0, 5, 9}, {5, 9, 10}},               // 206
-    {{4, 5, 9}, {5, 9, 10}},                          // 207
-    {{4, 6, 8}, {6, 8, 10}, {6, 7, 10}},              // 208
-    {{0, 1, 8}, {1, 8, 10}, {1, 6, 10}, {6, 7, 10}},  // 209
-    {{4, 6, 8}, {6, 8, 10}, {6, 7, 10}, {0, 2, 5}},   // 210
-    {{1, 2, 6}, {2, 6, 7}, {5, 8, 10}},               // 211
-    {{1, 3, 7}, {1, 7, 10}, {1, 8, 10}, {1, 4, 8}},   // 212
-    {{0, 3, 7}, {0, 7, 10}, {0, 8, 10}},              // 213
-    {{0, 1, 4}, {2, 3, 7}, {5, 8, 10}},               // 214
-    {{2, 3, 7}, {5, 8, 10}},                          // 215
-    {{2, 3, 6}, {2, 4, 6}, {2, 4, 8}, {2, 8, 10}},    // 216
-    {{0, 2, 8}, {2, 8, 10}, {1, 3, 6}},               // 217
-    {{0, 3, 4}, {3, 4, 6}, {5, 8, 10}},               // 218
-    {{1, 3, 6}, {5, 8, 10}},                          // 219
-    {{1, 2, 4}, {2, 4, 8}, {2, 8, 10}},               // 220
-    {{0, 2, 8}, {2, 8, 10}},                          // 221
-    {{0, 1, 4}, {5, 8, 10}},                          // 222
-    {{5, 8, 10}},                                     // 223
-    {{6, 7, 9}, {7, 8, 9}, {5, 7, 8}},                // 224
-    {{6, 7, 9}, {7, 8, 9}, {5, 7, 8}, {0, 1, 4}},     // 225
-    {{2, 6, 7}, {2, 6, 8}, {6, 8, 9}, {0, 2, 8}},     // 226
-    {{1, 2, 6}, {2, 6, 7}, {4, 8, 9}},                // 227
-    {{1, 3, 9}, {3, 7, 9}, {7, 8, 9}, {5, 7, 8}},     // 228
-    {{0, 3, 5}, {3, 5, 7}, {4, 8, 9}},                // 229
-    {{0, 1, 8}, {1, 8, 9}, {2, 3, 7}},                // 230
-    {{2, 3, 7}, {4, 8, 9}},                           // 231
-    {{2, 3, 6}, {2, 6, 9}, {2, 8, 9}, {2, 5, 8}},     // 232
-    {{0, 2, 5}, {1, 3, 6}, {4, 8, 9}},                // 233
-    {{0, 3, 6}, {0, 6, 9}, {0, 8, 9}},                // 234
-    {{1, 3, 6}, {4, 8, 9}},                           // 235
-    {{1, 2, 5}, {1, 5, 8}, {1, 8, 9}},                // 236
-    {{0, 2, 5}, {4, 8, 9}},                           // 237
-    {{0, 1, 8}, {1, 8, 9}},                           // 238
-    {{4, 8, 9}},                                      // 239
-    {{4, 5, 6}, {5, 6, 7}},                           // 240
-    {{1, 6, 7}, {0, 1, 7}, {0, 5, 7}},                // 241
-    {{0, 2, 4}, {2, 4, 6}, {2, 6, 7}},                // 242
-    {{1, 2, 6}, {2, 6, 7}},                           // 243
-    {{1, 3, 4}, {3, 4, 5}, {3, 5, 7}},                // 244
-    {{0, 3, 5}, {3, 5, 7}},                           // 245
-    {{0, 1, 4}, {2, 3, 7}},                           // 246
-    {{2, 3, 7}},                                      // 247
-    {{2, 3, 4}, {2, 4, 5}, {3, 4, 6}},                // 248
-    {{0, 2, 5}, {1, 3, 6}},                           // 249
-    {{0, 3, 4}, {3, 4, 6}},                           // 250
-    {{1, 3, 6}},                                      // 251
-    {{1, 2, 4}, {2, 4, 5}},                           // 252
-    {{0, 2, 5}},                                      // 253
-    {{0, 1, 4}},                                      // 254
-    {}                                                // 255
-};
-
 void VulkanApp::run()
 {
     initWindow();
-    initModel();
+    grid_ptr->constructSurface(vertices, indices); // move to drawFrame() once dynamic simulation is implemented
     initVulkan();
     mainLoop();
     cleanup();
@@ -339,130 +60,6 @@ void VulkanApp::framebufferResizeCallback(GLFWwindow *window, int width, int hei
 {
     auto app = reinterpret_cast<VulkanApp *>(glfwGetWindowUserPointer(window));
     app->framebufferResized = true;
-}
-
-void VulkanApp::initModel()
-{
-    std::array<float, 8> phis = {-0.5f, -0.5f, -0.5f, 0.5f,
-                                 0.5f, -0.5f, 0.5f, 0.5f};
-    std::array<float, 8> invPhis{};
-    for (uint32_t i = 0; i < 8; i++)
-    {
-        invPhis[i] = -phis[i];
-    }
-
-    glm::vec3 topPosition = {0.0f, -1.0f, 0.0f};
-    glm::vec3 bottomPosition = {0.0f, 1.0f, 0.0f};
-
-    std::array<float, 2> offset = {-0.5f, 0.5f};
-    for (uint32_t k = 0; k < 2; k++)
-    {
-        for (uint32_t j = 0; j < 2; j++)
-        {
-            for (uint32_t i = 0; i < 2; i++)
-            {
-                uint32_t index = (k << 2) + (j << 1) + i;
-                glm::vec3 topColor = phis[index] > 0.0f ? AIR_COLOR : WATER_COLOR;
-                glm::vec3 bottomColor = invPhis[index] > 0.0f ? AIR_COLOR : WATER_COLOR;
-                addCube(cubeSize, topPosition + glm::vec3(offset[i], offset[j], offset[k]), topColor);
-                addCube(cubeSize, bottomPosition + glm::vec3(offset[i], offset[j], offset[k]), bottomColor);
-            }
-        }
-    }
-
-    constructSurface(phis, glm::vec3(-0.5f, -0.5f, -0.5f) + topPosition);
-    constructSurface(invPhis, glm::vec3(-0.5f, -0.5f, -0.5f) + bottomPosition);
-}
-
-void VulkanApp::addCube(float size, glm::vec3 position, glm::vec3 color)
-{
-    // add 8 vertices to array
-    uint32_t startIndex = vertices.size();
-    vertices.resize(startIndex + 8);
-
-    std::array<float, 2> offset = {-0.5f * size, 0.5f * size};
-    for (uint32_t i = 0; i < 2; i++)
-    {
-        for (uint32_t j = 0; j < 2; j++)
-        {
-            for (uint32_t k = 0; k < 2; k++)
-            {
-                uint32_t index = (k << 2) + (j << 1) + i + startIndex;
-                float x = position.x + offset[i];
-                float y = position.y + offset[j];
-                float z = position.z + offset[k];
-                vertices[index] = {{x, y, z}, glm::vec3(0.0f), color};
-            }
-        }
-    }
-
-    // add 36 indices to index array
-    size_t indicesSize = indices.size();
-    indices.resize(indicesSize + cubeIndices.size());
-    for (uint16_t idx = 0; idx < cubeIndices.size(); idx++)
-    {
-        indices[indicesSize + idx] = cubeIndices[idx] + startIndex;
-    }
-
-    // add normals
-    for (uint16_t idx = indicesSize; idx < indices.size(); idx += 3)
-    {
-        std::array<Vertex, 3> triangle = {vertices[indices[idx]], vertices[indices[idx + 1]], vertices[indices[idx + 2]]};
-        glm::vec3 normal = glm::normalize(glm::cross(triangle[1].pos - triangle[0].pos, triangle[2].pos - triangle[0].pos));
-        vertices[indices[idx]].normal = normal;
-        vertices[indices[idx + 1]].normal = normal;
-        vertices[indices[idx + 2]].normal = normal;
-    }
-}
-
-void VulkanApp::constructSurface(const std::array<float, 8> &phis, const glm::vec3 cubePosition)
-{
-    uint8_t vertexMask = 0;
-    std::array<bool, 8> isWater{};
-
-    // identify polarity of air-water boundary, 8-bit pattern
-    for (uint8_t i = 0; i < 8; i++)
-    {
-        isWater[i] = phis[i] < 0.0f;
-        vertexMask |= isWater[i] << i;
-    }
-
-    MarchingCube marchingCube = marchingCubeLookup[vertexMask];
-
-    if (marchingCube.size() == 0)
-    {
-        return;
-    }
-
-    // pre-compute each edge's boundary
-    std::array<glm::vec3, 12> boundaryVertices{};
-    boundaryVertices[0] = isWater[0] != isWater[1] ? glm::vec3((0.0f - phis[0]) / (phis[1] - phis[0]), 0.0f, 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v1
-    boundaryVertices[1] = isWater[0] != isWater[2] ? glm::vec3(0.0f, (0.0f - phis[0]) / (phis[2] - phis[0]), 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v2
-    boundaryVertices[2] = isWater[1] != isWater[3] ? glm::vec3(CELL_WIDTH, (0.0f - phis[1]) / (phis[3] - phis[1]), 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);        // v1 -> v3
-    boundaryVertices[3] = isWater[2] != isWater[3] ? glm::vec3((0.0f - phis[2]) / (phis[3] - phis[2]), CELL_WIDTH, 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);        // v2 -> v3
-    boundaryVertices[4] = isWater[0] != isWater[4] ? glm::vec3(0.0f, 0.0f, (0.0f - phis[0]) / (phis[4] - phis[0])) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v4
-    boundaryVertices[5] = isWater[1] != isWater[5] ? glm::vec3(CELL_WIDTH, 0.0f, (0.0f - phis[1]) / (phis[5] - phis[1])) : glm::vec3(0.0f, 0.0f, 0.0f);        // v1 -> v5
-    boundaryVertices[6] = isWater[2] != isWater[6] ? glm::vec3(0.0f, CELL_WIDTH, (0.0f - phis[2]) / (phis[6] - phis[2])) : glm::vec3(0.0f, 0.0f, 0.0f);        // v2 -> v6
-    boundaryVertices[7] = isWater[3] != isWater[7] ? glm::vec3(CELL_WIDTH, CELL_WIDTH, (0.0f - phis[3]) / (phis[7] - phis[3])) : glm::vec3(0.0f, 0.0f, 0.0f);  // v3 -> v7
-    boundaryVertices[8] = isWater[4] != isWater[5] ? glm::vec3((0.0f - phis[4]) / (phis[5] - phis[4]), 0.0f, CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f);        // v4 -> v5
-    boundaryVertices[9] = isWater[4] != isWater[6] ? glm::vec3(0.0f, (0.0f - phis[4]) / (phis[6] - phis[4]), CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f);        // v4 -> v6
-    boundaryVertices[10] = isWater[5] != isWater[7] ? glm::vec3(CELL_WIDTH, (0.0f - phis[5]) / (phis[7] - phis[5]), CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f); // v5 -> v7
-    boundaryVertices[11] = isWater[6] != isWater[7] ? glm::vec3((0.0f - phis[6]) / (phis[7] - phis[6]), CELL_WIDTH, CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f); // v6 -> v7
-
-    for (uint32_t i = 0; i < marchingCube.size(); i++)
-    {
-        Triple triangle = marchingCube[i]; // { 0, 1, 4}
-        uint32_t startIndex = vertices.size();
-        uint32_t indicesSize = indices.size();
-        vertices.resize(startIndex + 3);
-        indices.resize(indicesSize + 3);
-        glm::vec3 normal = glm::normalize(glm::cross(boundaryVertices[triangle[1]] - boundaryVertices[triangle[0]], boundaryVertices[triangle[2]] - boundaryVertices[triangle[0]]));
-        for (uint32_t j = 0; j < 3; j++)
-        {
-            vertices[startIndex + j] = {boundaryVertices[triangle[j]] + cubePosition, normal, SURFACE_COLOR};
-            indices[indicesSize + j] = startIndex + j;
-        }
-    }
 }
 
 void VulkanApp::initVulkan()
@@ -491,7 +88,6 @@ void VulkanApp::initVulkan()
 void VulkanApp::mainLoop()
 {
     auto o = std::chrono::high_resolution_clock::now();
-
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -1386,8 +982,8 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage)
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
     UniformBufferObject ubo{};
     ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f) * 0.1f, glm::vec3(0.0f, 1.0f, 0.0f));
-    ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, -5.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
-    ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+    ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, -20.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 20.0f);
     ubo.proj[1][1] *= -1;
 
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
@@ -1419,7 +1015,7 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
     VkBuffer vertexBuffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
 

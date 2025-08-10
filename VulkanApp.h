@@ -1,3 +1,5 @@
+#pragma once
+
 #define GLFW_INCLUDE_VULKAN
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -9,6 +11,9 @@
 #include <optional>
 #include <string>
 #include <array>
+#include <memory>
+#include "Vertex.h"
+#include "Grid.h"
 
 struct QueueFamilyIndices
 {
@@ -28,57 +33,16 @@ struct SwapChainSupportDetails
     std::vector<VkPresentModeKHR> presentModes;
 };
 
-struct Vertex
-{
-    glm::vec3 pos;
-    glm::vec3 normal;
-    glm::vec3 color;
-
-    static VkVertexInputBindingDescription getBindingDescription()
-    {
-        VkVertexInputBindingDescription bindingDescription{};
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        return bindingDescription;
-    }
-
-    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions()
-    {
-        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
-
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, normal);
-
-        attributeDescriptions[2].binding = 0;
-        attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, color);
-
-        return attributeDescriptions;
-    }
-};
-
 class VulkanApp
 {
 public:
+    VulkanApp() : grid_ptr(std::make_unique<Grid>()) {}
     void run();
 
 private:
     void initWindow();
 
     static void framebufferResizeCallback(GLFWwindow *window, int width, int height);
-
-    void initModel();
-    void addCube(float size, glm::vec3 position, glm::vec3 color);
-    void constructSurface(const std::array<float, 8> &phis, const glm::vec3 cubePosition);
 
     void initVulkan();
     void mainLoop();
@@ -162,7 +126,9 @@ private:
     std::vector<void *> uniformBuffersMapped;
 
     std::vector<Vertex> vertices;
-    std::vector<uint16_t> indices;
+    std::vector<uint32_t> indices;
+
+    std::unique_ptr<Grid> grid_ptr;
 
     uint32_t currentFrame = 0;
     bool framebufferResized = false;

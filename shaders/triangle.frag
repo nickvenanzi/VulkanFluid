@@ -7,7 +7,7 @@ layout(location = 2) in vec3 fragColor;
 layout(location = 0) out vec4 outColor;
 
 // Hardcoded light and material properties
-const vec3 lightPos = vec3(0.0, 0.0, -4.0);
+const vec3 lightPos = vec3(0.0, 0.0, -8.0);
 const vec3 lightColor = vec3(1.0);        // White light
 const float diffuseStrength = 0.3;
 const float ambientStrength = 0.1;      // Ambient light
