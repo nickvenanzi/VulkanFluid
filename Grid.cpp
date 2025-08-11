@@ -2,11 +2,11 @@
 #include <cmath>
 #include <iostream>
 
-constexpr uint32_t Nx = 10;
-constexpr uint32_t Ny = 10;
-constexpr uint32_t Nz = 10;
+constexpr uint32_t Nx = 100;
+constexpr uint32_t Ny = 100;
+constexpr uint32_t Nz = 100;
 constexpr uint32_t NyNz = Ny * Nz;
-constexpr float CELL_WIDTH = 1.0f;
+constexpr float CELL_WIDTH = 0.1f;
 constexpr glm::vec3 SURFACE_COLOR = {1.0f, 1.0f, 1.0f};
 constexpr glm::vec3 globalOffset = {-(Nx * CELL_WIDTH) / 2.0f, -(Ny *CELL_WIDTH) / 2.0f, -(Nz *CELL_WIDTH) / 2.0f};
 
@@ -289,7 +289,6 @@ Grid::Grid()
                 glm::vec3 position = getPosition(i, j, k);
                 float distance = std::sqrt((position.x - center.x) * (position.x - center.x) + (position.y - center.y) * (position.y - center.y) + (position.z - center.z) * (position.z - center.z)) - radius;
                 phi[index] = distance;
-                // phi[index] = float(i) - 2.5f;
                 index += 1;
             }
         }
@@ -333,11 +332,7 @@ void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t>
                 {
                     isWater[byte] = localPhis[byte] < 0.0f;
                     vertexMask |= isWater[byte] << byte;
-
-                    std::cout << isWater[(uint32_t)byte] << ", ";
                 }
-                std::cout << ": " << (uint32_t)vertexMask;
-                std::cout << std::endl;
 
                 MarchingCube marchingCube = marchingCubeLookup[vertexMask];
 
@@ -352,18 +347,18 @@ void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t>
 
                 // pre-compute each edge's boundary
                 std::array<glm::vec3, 12> boundaryVertices{};
-                boundaryVertices[0] = isWater[0] != isWater[1] ? glm::vec3((0.0f - localPhis[0]) / (localPhis[1] - localPhis[0]), 0.0f, 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v1
-                boundaryVertices[1] = isWater[0] != isWater[2] ? glm::vec3(0.0f, (0.0f - localPhis[0]) / (localPhis[2] - localPhis[0]), 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v2
-                boundaryVertices[2] = isWater[1] != isWater[3] ? glm::vec3(CELL_WIDTH, (0.0f - localPhis[1]) / (localPhis[3] - localPhis[1]), 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);        // v1 -> v3
-                boundaryVertices[3] = isWater[2] != isWater[3] ? glm::vec3((0.0f - localPhis[2]) / (localPhis[3] - localPhis[2]), CELL_WIDTH, 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);        // v2 -> v3
-                boundaryVertices[4] = isWater[0] != isWater[4] ? glm::vec3(0.0f, 0.0f, (0.0f - localPhis[0]) / (localPhis[4] - localPhis[0])) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v4
-                boundaryVertices[5] = isWater[1] != isWater[5] ? glm::vec3(CELL_WIDTH, 0.0f, (0.0f - localPhis[1]) / (localPhis[5] - localPhis[1])) : glm::vec3(0.0f, 0.0f, 0.0f);        // v1 -> v5
-                boundaryVertices[6] = isWater[2] != isWater[6] ? glm::vec3(0.0f, CELL_WIDTH, (0.0f - localPhis[2]) / (localPhis[6] - localPhis[2])) : glm::vec3(0.0f, 0.0f, 0.0f);        // v2 -> v6
-                boundaryVertices[7] = isWater[3] != isWater[7] ? glm::vec3(CELL_WIDTH, CELL_WIDTH, (0.0f - localPhis[3]) / (localPhis[7] - localPhis[3])) : glm::vec3(0.0f, 0.0f, 0.0f);  // v3 -> v7
-                boundaryVertices[8] = isWater[4] != isWater[5] ? glm::vec3((0.0f - localPhis[4]) / (localPhis[5] - localPhis[4]), 0.0f, CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f);        // v4 -> v5
-                boundaryVertices[9] = isWater[4] != isWater[6] ? glm::vec3(0.0f, (0.0f - localPhis[4]) / (localPhis[6] - localPhis[4]), CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f);        // v4 -> v6
-                boundaryVertices[10] = isWater[5] != isWater[7] ? glm::vec3(CELL_WIDTH, (0.0f - localPhis[5]) / (localPhis[7] - localPhis[5]), CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f); // v5 -> v7
-                boundaryVertices[11] = isWater[6] != isWater[7] ? glm::vec3((0.0f - localPhis[6]) / (localPhis[7] - localPhis[6]), CELL_WIDTH, CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f); // v6 -> v7
+                boundaryVertices[0] = isWater[0] != isWater[1] ? glm::vec3((-CELL_WIDTH * localPhis[0]) / (localPhis[1] - localPhis[0]), 0.0f, 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v1
+                boundaryVertices[1] = isWater[0] != isWater[2] ? glm::vec3(0.0f, (-CELL_WIDTH * localPhis[0]) / (localPhis[2] - localPhis[0]), 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v2
+                boundaryVertices[2] = isWater[1] != isWater[3] ? glm::vec3(CELL_WIDTH, (-CELL_WIDTH * localPhis[1]) / (localPhis[3] - localPhis[1]), 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);        // v1 -> v3
+                boundaryVertices[3] = isWater[2] != isWater[3] ? glm::vec3((-CELL_WIDTH * localPhis[2]) / (localPhis[3] - localPhis[2]), CELL_WIDTH, 0.0f) : glm::vec3(0.0f, 0.0f, 0.0f);        // v2 -> v3
+                boundaryVertices[4] = isWater[0] != isWater[4] ? glm::vec3(0.0f, 0.0f, (-CELL_WIDTH * localPhis[0]) / (localPhis[4] - localPhis[0])) : glm::vec3(0.0f, 0.0f, 0.0f);              // v0 -> v4
+                boundaryVertices[5] = isWater[1] != isWater[5] ? glm::vec3(CELL_WIDTH, 0.0f, (-CELL_WIDTH * localPhis[1]) / (localPhis[5] - localPhis[1])) : glm::vec3(0.0f, 0.0f, 0.0f);        // v1 -> v5
+                boundaryVertices[6] = isWater[2] != isWater[6] ? glm::vec3(0.0f, CELL_WIDTH, (-CELL_WIDTH * localPhis[2]) / (localPhis[6] - localPhis[2])) : glm::vec3(0.0f, 0.0f, 0.0f);        // v2 -> v6
+                boundaryVertices[7] = isWater[3] != isWater[7] ? glm::vec3(CELL_WIDTH, CELL_WIDTH, (-CELL_WIDTH * localPhis[3]) / (localPhis[7] - localPhis[3])) : glm::vec3(0.0f, 0.0f, 0.0f);  // v3 -> v7
+                boundaryVertices[8] = isWater[4] != isWater[5] ? glm::vec3((-CELL_WIDTH * localPhis[4]) / (localPhis[5] - localPhis[4]), 0.0f, CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f);        // v4 -> v5
+                boundaryVertices[9] = isWater[4] != isWater[6] ? glm::vec3(0.0f, (-CELL_WIDTH * localPhis[4]) / (localPhis[6] - localPhis[4]), CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f);        // v4 -> v6
+                boundaryVertices[10] = isWater[5] != isWater[7] ? glm::vec3(CELL_WIDTH, (-CELL_WIDTH * localPhis[5]) / (localPhis[7] - localPhis[5]), CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f); // v5 -> v7
+                boundaryVertices[11] = isWater[6] != isWater[7] ? glm::vec3((-CELL_WIDTH * localPhis[6]) / (localPhis[7] - localPhis[6]), CELL_WIDTH, CELL_WIDTH) : glm::vec3(0.0f, 0.0f, 0.0f); // v6 -> v7
 
                 for (uint32_t i = 0; i < marchingCube.size(); i++)
                 {
