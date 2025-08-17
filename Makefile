@@ -1,4 +1,4 @@
-CFLAGS = -std=c++17
+CFLAGS = -std=c++17 -Iinclude
 
 LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi
 
@@ -9,11 +9,16 @@ else
     CFLAGS += -DNDEBUG -O2
 endif
 
-# Find all .cpp files recursively starting from current directory
-SRCS := $(shell find . -name '*.cpp')
+# Directories
+SRCDIR := src
+INCDIR := include
+OBJDIR := build
 
-# Create corresponding object files replacing .cpp with .o
-OBJS := $(SRCS:.cpp=.o)
+# Find all .cpp files in /src
+SRCS := $(shell find $(SRCDIR) -name '*.cpp')
+
+# Create object file list in $(OBJDIR), preserving subdirectory structure
+OBJS := $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SRCS))
 
 TARGET = App
 
@@ -23,7 +28,8 @@ $(TARGET): $(OBJS)
 	g++ $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Compile rule for .o from .cpp
-%.o: %.cpp
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(dir $@)
 	@echo "Compiling $< ..."
 	g++ $(CFLAGS) -c $< -o $@
 
@@ -36,7 +42,7 @@ test: all
 	./$(TARGET)
 
 clean: 
-	rm -f $(OBJS) $(TARGET)
+	rm -rf $(OBJDIR) $(TARGET)
 	rm -f shaders/*.spv
 
 

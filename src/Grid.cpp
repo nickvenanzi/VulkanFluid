@@ -1,14 +1,17 @@
 #include "Grid.h"
 #include <cmath>
 #include <iostream>
+#include <algorithm>
 
-constexpr uint32_t Nx = 100;
-constexpr uint32_t Ny = 100;
-constexpr uint32_t Nz = 100;
+constexpr uint32_t Nx = 10;
+constexpr uint32_t Ny = 10;
+constexpr uint32_t Nz = 10;
 constexpr uint32_t NyNz = Ny * Nz;
-constexpr float CELL_WIDTH = 0.1f;
+constexpr float CELL_WIDTH = 1.0f;
+constexpr float INV_CELL_WIDTH = 1.0f / CELL_WIDTH;
 constexpr glm::vec3 SURFACE_COLOR = {1.0f, 1.0f, 1.0f};
 constexpr glm::vec3 globalOffset = {-(Nx * CELL_WIDTH) / 2.0f, -(Ny *CELL_WIDTH) / 2.0f, -(Nz *CELL_WIDTH) / 2.0f};
+constexpr std::array<float, 4> BODY_FORCES = {0.0f, 0.0f, 0.1f, 0.0f}; // gravity
 
 #define Triple std::array<uint32_t, 3>
 #define MarchingCube std::vector<Triple>
@@ -274,7 +277,13 @@ const MarchingCube marchingCubeLookup[256] = {
 
 Grid::Grid()
 {
-    phi.resize(Nx * Ny * Nz);
+    for (uint32_t storage_idx = 0; storage_idx < 2; storage_idx++)
+    {
+        phi_arrays[storage_idx].resize(Nx * Ny * Nz);
+        u_minus_arrays[storage_idx].resize((Nx + 1) * Ny * Nz);
+        v_minus_arrays[storage_idx].resize(Nx * (Ny + 1) * Nz);
+        w_minus_arrays[storage_idx].resize(Nx * Ny * (Nz + 1));
+    }
 
     // add sphere
     float radius = 4.0f;
@@ -288,16 +297,13 @@ Grid::Grid()
             {
                 glm::vec3 position = getPosition(i, j, k);
                 float distance = std::sqrt((position.x - center.x) * (position.x - center.x) + (position.y - center.y) * (position.y - center.y) + (position.z - center.z) * (position.z - center.z)) - radius;
-                phi[index] = distance;
+                phi_arrays[oldStorage][index] = distance;
+                phi_arrays[newStorage][index] = distance;
+
                 index += 1;
             }
         }
     }
-}
-
-inline float Grid::getPhi(uint32_t x_i, uint32_t y_i, uint32_t z_i)
-{
-    return phi[x_i * NyNz + y_i * Nz + z_i];
 }
 
 inline glm::vec3 Grid::getPosition(uint32_t x_i, uint32_t y_i, uint32_t z_i)
@@ -305,8 +311,89 @@ inline glm::vec3 Grid::getPosition(uint32_t x_i, uint32_t y_i, uint32_t z_i)
     return glm::vec3((float)x_i * CELL_WIDTH, (float)y_i * CELL_WIDTH, (float)z_i * CELL_WIDTH) + globalOffset;
 }
 
+void Grid::advect(float deltaT)
+{
+    const std::vector<float> &phi_old = phi_arrays[oldStorage];
+    const std::vector<float> &u_minus_old = u_minus_arrays[oldStorage];
+    const std::vector<float> &v_minus_old = v_minus_arrays[oldStorage];
+    const std::vector<float> &w_minus_old = w_minus_arrays[oldStorage];
+
+    std::vector<float> &phi_new = phi_arrays[newStorage];
+    std::vector<float> &u_minus_new = u_minus_arrays[newStorage];
+    std::vector<float> &v_minus_new = v_minus_arrays[newStorage];
+    std::vector<float> &w_minus_new = w_minus_arrays[newStorage];
+
+    std::array<const std::vector<float> &, 4> parameters_old = {
+        phi_old,
+        u_minus_old,
+        v_minus_old,
+        w_minus_old};
+
+    std::array<std::vector<float> &, 4> parameters_new = {
+        phi_new,
+        u_minus_new,
+        v_minus_new,
+        w_minus_new};
+
+    // advect phi and velocity for each non-solid cell (exclude i/j/k == 0 or N)
+    for (uint32_t i = 1; i < Nx - 1; i++)
+    {
+        for (uint32_t j = 1; j < Ny - 1; j++)
+        {
+            for (uint32_t k = 1; k < Nz - 1; k++)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+
+                // get distance (# of cells) traversed using current velocities
+                float x = 0.5f * deltaT * INV_CELL_WIDTH * (u_minus_old[base_index] + u_minus_old[base_index + NyNz]); // u_minus[i,j,k] + u_plus[i,j,k]
+                float y = 0.5f * deltaT * INV_CELL_WIDTH * (v_minus_old[base_index] + v_minus_old[base_index + Nz]);   // v_minus[i,j,k] + v_plus[i,j,k]
+                float z = 0.5f * deltaT * INV_CELL_WIDTH * (w_minus_old[base_index] + w_minus_old[base_index + 1]);    // w_minus[i,j,k] + w_plus[i,j,k]
+
+                float i_new_f = std::clamp((float)i - x, 1.0f, (float)(Nx - 2));
+                float j_new_f = std::clamp((float)j - y, 1.0f, (float)(Ny - 2));
+                float k_new_f = std::clamp((float)k - z, 1.0f, (float)(Nz - 2));
+
+                uint32_t i_new = static_cast<uint32_t>(i_new_f);
+                uint32_t j_new = static_cast<uint32_t>(j_new_f);
+                uint32_t k_new = static_cast<uint32_t>(k_new_f);
+
+                uint32_t dest_index = i_new * NyNz + j_new * Nz + k_new;
+
+                float i_alpha = i_new_f - (float)i_new; // 5.2362 -> 0.2362
+                float j_alpha = j_new_f - (float)j_new;
+                float k_alpha = k_new_f - (float)k_new;
+
+                float i_beta = 1.0f - i_alpha;
+                float j_beta = 1.0f - j_alpha;
+                float k_beta = 1.0f - k_alpha;
+
+                // trilinear interpolation
+                for (uint32_t param_idx = 0; i < 4; i++)
+                {
+                    const std::vector<float> &vals = parameters_old[param_idx];
+                    float param_i0 = (i_alpha * vals[dest_index]) + (i_beta * vals[dest_index + NyNz]);                   // i,j,k <-> i+1,j,k
+                    float param_i1 = (i_alpha * vals[dest_index + Nz]) + (i_beta * vals[dest_index + NyNz + Nz]);         // i,j+1,k <-> i+1,j+1,k
+                    float param_i2 = (i_alpha * vals[dest_index + 1]) + (i_beta * vals[dest_index + NyNz + 1]);           // i,j,k+1 <-> i+1,j,k+1
+                    float param_i3 = (i_alpha * vals[dest_index + Nz + 1]) + (i_beta * vals[dest_index + NyNz + Nz + 1]); // i,j+1,k+1 <-> i+1,j+1,k+1
+
+                    float param_ij0 = (j_alpha * param_i0) + (j_beta * param_i1);
+                    float param_ij1 = (j_alpha * param_i2) + (j_beta * param_i3);
+
+                    float interp_val = (k_alpha * param_ij0) + (k_beta * param_ij1);
+                    parameters_new[param_idx][base_index] = interp_val + BODY_FORCES[param_idx];
+                }
+            }
+        }
+    }
+}
+
 void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t> &indices)
 {
+    const std::vector<float> &phi = phi_arrays[newStorage];
+
+    vertices.resize(0);
+    indices.resize(0);
+
     std::array<float, 8> localPhis;
     std::array<bool, 8> isWater{};
 
@@ -319,14 +406,16 @@ void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t>
             {
                 uint8_t vertexMask = 0;
 
-                localPhis[0] = getPhi(i, j, k);
-                localPhis[1] = getPhi(i + 1, j, k);
-                localPhis[2] = getPhi(i, j + 1, k);
-                localPhis[3] = getPhi(i + 1, j + 1, k);
-                localPhis[4] = getPhi(i, j, k + 1);
-                localPhis[5] = getPhi(i + 1, j, k + 1);
-                localPhis[6] = getPhi(i, j + 1, k + 1);
-                localPhis[7] = getPhi(i + 1, j + 1, k + 1);
+                uint32_t baseIndex = i * NyNz + j * Nz + k;
+                localPhis[0] = phi[baseIndex];                 // i, j, k
+                localPhis[1] = phi[baseIndex + NyNz];          // i+1, j, k
+                localPhis[2] = phi[baseIndex + Nz];            // i, j+1, k
+                localPhis[3] = phi[baseIndex + NyNz + Nz];     // i+1, j+1, k
+                localPhis[4] = phi[baseIndex + 1];             // i, j, k+1
+                localPhis[5] = phi[baseIndex + NyNz + 1];      // i+1, j, k+1
+                localPhis[6] = phi[baseIndex + Nz + 1];        // i, j+1, k+1
+                localPhis[7] = phi[baseIndex + NyNz + Nz + 1]; // i+1, j+1, k+1
+
                 // identify polarity of air-water boundary, 8-bit pattern
                 for (uint8_t byte = 0; byte < 8; byte++)
                 {
@@ -343,7 +432,7 @@ void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t>
 
                 glm::vec3 position = getPosition(i, j, k);
 
-                std::cout << position.x << ", " << position.y << ", " << position.z << std::endl;
+                // std::cout << position.x << ", " << position.y << ", " << position.z << std::endl;
 
                 // pre-compute each edge's boundary
                 std::array<glm::vec3, 12> boundaryVertices{};

@@ -87,12 +87,15 @@ void VulkanApp::initVulkan()
 
 void VulkanApp::mainLoop()
 {
-    auto o = std::chrono::high_resolution_clock::now();
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
+        auto start = std::chrono::high_resolution_clock::now();
         drawFrame();
-        usleep(10000); // sleep for 10ms
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << duration.count() << " ms" << std::endl;
+        usleep(1000); // sleep for 1ms
     }
     vkDeviceWaitIdle(device);
 }
