@@ -69,6 +69,7 @@ private:
     VkFormat findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
     void createVertexBuffer();
     void createIndexBuffer();
+
     void createUniformBuffers();
     void createDescriptorPool();
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
@@ -119,14 +120,22 @@ private:
     std::vector<VkFence> inFlightFences;
     VkBuffer vertexBuffer;
     VkBuffer indexBuffer;
+    VkBuffer stagingVertexBuffer;
+    VkBuffer stagingIndexBuffer;
     VkDeviceMemory vertexBufferMemory;
     VkDeviceMemory indexBufferMemory;
+    VkDeviceMemory stagingVertexMemory;
+    VkDeviceMemory stagingIndexMemory;
+
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
     std::vector<void *> uniformBuffersMapped;
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+
+    void *cpuVertexBuffer;
+    void *cpuIndexBuffer;
 
     std::unique_ptr<Grid> grid_ptr;
 

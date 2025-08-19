@@ -3,15 +3,15 @@
 #include <iostream>
 #include <algorithm>
 
-constexpr uint32_t Nx = 10;
-constexpr uint32_t Ny = 10;
-constexpr uint32_t Nz = 10;
+constexpr uint32_t Nx = 100;
+constexpr uint32_t Ny = 100;
+constexpr uint32_t Nz = 100;
 constexpr uint32_t NyNz = Ny * Nz;
-constexpr float CELL_WIDTH = 1.0f;
+constexpr float CELL_WIDTH = 0.1f;
 constexpr float INV_CELL_WIDTH = 1.0f / CELL_WIDTH;
 constexpr glm::vec3 SURFACE_COLOR = {1.0f, 1.0f, 1.0f};
 constexpr glm::vec3 globalOffset = {-(Nx * CELL_WIDTH) / 2.0f, -(Ny *CELL_WIDTH) / 2.0f, -(Nz *CELL_WIDTH) / 2.0f};
-constexpr std::array<float, 4> BODY_FORCES = {0.0f, 0.0f, 0.1f, 0.0f}; // gravity
+constexpr std::array<float, 4> BODY_FORCES = {0.0f, 10.0f, 10.0f, 10.0f}; // gravity
 
 #define Triple std::array<uint32_t, 3>
 #define MarchingCube std::vector<Triple>
@@ -323,17 +323,17 @@ void Grid::advect(float deltaT)
     std::vector<float> &v_minus_new = v_minus_arrays[newStorage];
     std::vector<float> &w_minus_new = w_minus_arrays[newStorage];
 
-    std::array<const std::vector<float> &, 4> parameters_old = {
-        phi_old,
-        u_minus_old,
-        v_minus_old,
-        w_minus_old};
+    std::array<const std::vector<float> *, 4> parameters_old = {
+        &phi_old,
+        &u_minus_old,
+        &v_minus_old,
+        &w_minus_old};
 
-    std::array<std::vector<float> &, 4> parameters_new = {
-        phi_new,
-        u_minus_new,
-        v_minus_new,
-        w_minus_new};
+    std::array<std::vector<float> *, 4> parameters_new = {
+        &phi_new,
+        &u_minus_new,
+        &v_minus_new,
+        &w_minus_new};
 
     // advect phi and velocity for each non-solid cell (exclude i/j/k == 0 or N)
     for (uint32_t i = 1; i < Nx - 1; i++)
@@ -368,9 +368,9 @@ void Grid::advect(float deltaT)
                 float k_beta = 1.0f - k_alpha;
 
                 // trilinear interpolation
-                for (uint32_t param_idx = 0; i < 4; i++)
+                for (uint32_t param_idx = 0; param_idx < 4; param_idx++)
                 {
-                    const std::vector<float> &vals = parameters_old[param_idx];
+                    const std::vector<float> &vals = *parameters_old[param_idx];
                     float param_i0 = (i_alpha * vals[dest_index]) + (i_beta * vals[dest_index + NyNz]);                   // i,j,k <-> i+1,j,k
                     float param_i1 = (i_alpha * vals[dest_index + Nz]) + (i_beta * vals[dest_index + NyNz + Nz]);         // i,j+1,k <-> i+1,j+1,k
                     float param_i2 = (i_alpha * vals[dest_index + 1]) + (i_beta * vals[dest_index + NyNz + 1]);           // i,j,k+1 <-> i+1,j,k+1
@@ -380,11 +380,13 @@ void Grid::advect(float deltaT)
                     float param_ij1 = (j_alpha * param_i2) + (j_beta * param_i3);
 
                     float interp_val = (k_alpha * param_ij0) + (k_beta * param_ij1);
-                    parameters_new[param_idx][base_index] = interp_val + BODY_FORCES[param_idx];
+                    (*parameters_new[param_idx])[base_index] = interp_val + (BODY_FORCES[param_idx] * deltaT);
                 }
             }
         }
     }
+
+    std::cout << "V_minus: " << v_minus_new[(int)(Nx / 2) * NyNz + (int)(Ny / 2) * Nz + (int)(Nz / 2)] << std::endl;
 }
 
 void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t> &indices)
@@ -466,6 +468,11 @@ void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t>
             }
         }
     }
-    std::cout << "Number of vertices: " << vertices.size() << std::endl;
-    std::cout << "Number of indices: " << indices.size() << std::endl;
+    std::cout << "Number of triangles: " << indices.size() / 3 << std::endl;
+}
+
+void Grid::flipStorage()
+{
+    newStorage = 1 - newStorage;
+    oldStorage = 1 - oldStorage;
 }

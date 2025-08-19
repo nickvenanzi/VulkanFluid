@@ -29,6 +29,7 @@ const std::vector<const char *> deviceExtensions = {
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 const int MAX_FRAMES_IN_FLIGHT = 2;
+const size_t MAX_VERTICES = 1'000'000;
 
 struct UniformBufferObject
 {
@@ -40,7 +41,6 @@ struct UniformBufferObject
 void VulkanApp::run()
 {
     initWindow();
-    grid_ptr->constructSurface(vertices, indices); // move to drawFrame() once dynamic simulation is implemented
     initVulkan();
     mainLoop();
     cleanup();
@@ -87,15 +87,27 @@ void VulkanApp::initVulkan()
 
 void VulkanApp::mainLoop()
 {
+    float deltaT = 0.0f;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
         auto start = std::chrono::high_resolution_clock::now();
+        grid_ptr->advect(deltaT);
+        auto start0 = std::chrono::high_resolution_clock::now();
+        grid_ptr->constructSurface(vertices, indices);
+        auto start1 = std::chrono::high_resolution_clock::now();
         drawFrame();
         auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << duration.count() << " ms" << std::endl;
+        auto duration0 = std::chrono::duration_cast<std::chrono::milliseconds>(start0 - start);
+        auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(start1 - start0);
+        auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start1);
+        std::cout << duration0.count() << " ms, " << duration1.count() << " ms, " << duration2.count() << " ms" << std::endl;
         usleep(1000); // sleep for 1ms
+
+        auto total = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        deltaT = total.count() / 1000.0f; // seconds
+        std::cout << "DeltaT = " << deltaT << " s" << std::endl;
+        grid_ptr->flipStorage();
     }
     vkDeviceWaitIdle(device);
 }
@@ -174,10 +186,17 @@ void VulkanApp::cleanup()
     cleanupSwapChain();
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+    vkUnmapMemory(device, stagingVertexMemory);
+    vkUnmapMemory(device, stagingIndexMemory);
     vkDestroyBuffer(device, vertexBuffer, nullptr);
     vkDestroyBuffer(device, indexBuffer, nullptr);
+    vkDestroyBuffer(device, stagingVertexBuffer, nullptr);
+    vkDestroyBuffer(device, stagingIndexBuffer, nullptr);
     vkFreeMemory(device, vertexBufferMemory, nullptr);
     vkFreeMemory(device, indexBufferMemory, nullptr);
+    vkFreeMemory(device, stagingVertexMemory, nullptr);
+    vkFreeMemory(device, stagingIndexMemory, nullptr);
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
@@ -788,44 +807,22 @@ VkFormat VulkanApp::findSupportedFormat(const std::vector<VkFormat> &candidates,
 
 void VulkanApp::createVertexBuffer()
 {
-    VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+    VkDeviceSize maxBufferSize = sizeof(Vertex) * MAX_VERTICES;
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingMemory;
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingMemory);
+    createBuffer(maxBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingVertexBuffer, stagingVertexMemory);
+    createBuffer(maxBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
 
-    void *data;
-    vkMapMemory(device, stagingMemory, 0, bufferSize, 0, &data);
-    memcpy(data, vertices.data(), (size_t)bufferSize);
-    vkUnmapMemory(device, stagingMemory);
-
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
-
-    copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
-
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
-    vkFreeMemory(device, stagingMemory, nullptr);
+    vkMapMemory(device, stagingVertexMemory, 0, maxBufferSize, 0, &cpuVertexBuffer);
 }
 
 void VulkanApp::createIndexBuffer()
 {
-    VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+    VkDeviceSize maxBufferSize = sizeof(uint32_t) * MAX_VERTICES * 3;
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingMemory;
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingMemory);
+    createBuffer(maxBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingIndexBuffer, stagingIndexMemory);
+    createBuffer(maxBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
 
-    void *data;
-    vkMapMemory(device, stagingMemory, 0, bufferSize, 0, &data);
-    memcpy(data, indices.data(), (size_t)bufferSize);
-    vkUnmapMemory(device, stagingMemory);
-
-    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
-
-    copyBuffer(stagingBuffer, indexBuffer, bufferSize);
-
-    vkDestroyBuffer(device, stagingBuffer, nullptr);
-    vkFreeMemory(device, stagingMemory, nullptr);
+    vkMapMemory(device, stagingIndexMemory, 0, maxBufferSize, 0, &cpuIndexBuffer);
 }
 
 void VulkanApp::createUniformBuffers()
@@ -982,7 +979,8 @@ void VulkanApp::updateUniformBuffer(uint32_t currentImage)
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
     auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+    // float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+    float time = 0.0f;
     UniformBufferObject ubo{};
     ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f) * 0.1f, glm::vec3(0.0f, 1.0f, 0.0f));
     ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, -20.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
@@ -996,8 +994,63 @@ void VulkanApp::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imag
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = 0;
-    beginInfo.pInheritanceInfo = nullptr;
+
+    // Copy vertex and index buffers
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to begin recording command buffer!");
+    }
+
+    // --- Copy CPU-written staging buffers to GPU-local buffers ---
+    if (!vertices.empty())
+    {
+        VkDeviceSize vertexBufferSize = sizeof(Vertex) * vertices.size();
+        memcpy(cpuVertexBuffer, vertices.data(), (size_t)vertexBufferSize);
+
+        VkBufferCopy vtxCopy{};
+        vtxCopy.size = vertexBufferSize;
+        vkCmdCopyBuffer(commandBuffer, stagingVertexBuffer, vertexBuffer, 1, &vtxCopy);
+
+        VkBufferMemoryBarrier vtxBarrier{};
+        vtxBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        vtxBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vtxBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        vtxBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        vtxBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        vtxBarrier.buffer = vertexBuffer;
+        vtxBarrier.offset = 0;
+        vtxBarrier.size = VK_WHOLE_SIZE;
+
+        vkCmdPipelineBarrier(commandBuffer,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                             0, 0, nullptr, 1, &vtxBarrier, 0, nullptr);
+    }
+
+    if (!indices.empty())
+    {
+        VkDeviceSize indexBufferSize = sizeof(uint32_t) * indices.size();
+        memcpy(cpuIndexBuffer, indices.data(), (size_t)indexBufferSize);
+
+        VkBufferCopy idxCopy{};
+        idxCopy.size = indexBufferSize;
+        vkCmdCopyBuffer(commandBuffer, stagingIndexBuffer, indexBuffer, 1, &idxCopy);
+
+        VkBufferMemoryBarrier idxBarrier{};
+        idxBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        idxBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        idxBarrier.dstAccessMask = VK_ACCESS_INDEX_READ_BIT;
+        idxBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        idxBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        idxBarrier.buffer = indexBuffer;
+        idxBarrier.offset = 0;
+        idxBarrier.size = VK_WHOLE_SIZE;
+
+        vkCmdPipelineBarrier(commandBuffer,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                             0, 0, nullptr, 1, &idxBarrier, 0, nullptr);
+    }
 
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
