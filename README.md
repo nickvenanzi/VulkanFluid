@@ -22,6 +22,7 @@ The goal is to demonstrate efficient GPU-based numerical methods for real-time o
 Here’s a preview of the simulation running on Raspberry Pi 4:
 
 <video src="LiquidDropAnimation.mp4" controls autoplay loop muted width="600"></video>
+https://youtu.be/pTcXrs3pheY?si=Wqf2NkqO-kCxDHCS
 
 ---
 
