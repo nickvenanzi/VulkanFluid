@@ -3,15 +3,16 @@
 #include <iostream>
 #include <algorithm>
 
-constexpr uint32_t Nx = 100;
-constexpr uint32_t Ny = 100;
-constexpr uint32_t Nz = 100;
+constexpr uint32_t Nx = 200;
+constexpr uint32_t Ny = 200;
+constexpr uint32_t Nz = 200;
 constexpr uint32_t NyNz = Ny * Nz;
-constexpr float CELL_WIDTH = 0.1f;
+constexpr float CELL_WIDTH = 10.0f / (float)Nx;
 constexpr float INV_CELL_WIDTH = 1.0f / CELL_WIDTH;
 constexpr glm::vec3 SURFACE_COLOR = {1.0f, 1.0f, 1.0f};
 constexpr glm::vec3 globalOffset = {-(Nx * CELL_WIDTH) / 2.0f, -(Ny *CELL_WIDTH) / 2.0f, -(Nz *CELL_WIDTH) / 2.0f};
 constexpr std::array<float, 4> BODY_FORCES = {0.0f, 0.0f, 0.1f, 0.0f}; // gravity
+constexpr float RHO = 1000.0f;
 
 #define Triple std::array<uint32_t, 3>
 #define MarchingCube std::vector<Triple>
@@ -284,6 +285,11 @@ Grid::Grid()
         v_minus_arrays[storage_idx].resize(Nx * (Ny + 1) * Nz);
         w_minus_arrays[storage_idx].resize(Nx * Ny * (Nz + 1));
     }
+    Adiag.resize(Nx * Ny * Nz);
+    AplusI.resize(Nx * Ny * Nz);
+    AplusJ.resize(Nx * Ny * Nz);
+    AplusK.resize(Nx * Ny * Nz);
+    D.resize(Nx * Ny * Nz);
 
     // add sphere
     float radius = 4.0f;
@@ -297,7 +303,6 @@ Grid::Grid()
             {
                 glm::vec3 position = getPosition(i, j, k);
                 float distance = std::sqrt((position.x - center.x) * (position.x - center.x) + (position.y - center.y) * (position.y - center.y) + (position.z - center.z) * (position.z - center.z)) - radius;
-                // float distance = (float)(i + 2.0 * k) / 2.0f - ((float)Nx / 2.0f * CELL_WIDTH);
                 phi_arrays[oldStorage][index] = distance;
                 phi_arrays[newStorage][index] = distance;
 
@@ -371,11 +376,6 @@ void Grid::advect(float deltaT)
                 // trilinear interpolation
                 for (uint32_t param_idx = 0; param_idx < 4; param_idx++)
                 {
-                    // if (param_idx != 0 && (*parameters_new[0])[base_index] > 0.0f) // air, no velocity or pressure
-                    // {
-                    //     (*parameters_new[param_idx])[base_index] = 0.0f;
-                    //     continue;
-                    // }
                     const std::vector<float> &vals = *parameters_old[param_idx];
                     float param_i0 = (i_alpha * vals[dest_index]) + (i_beta * vals[dest_index + NyNz]);                   // i,j,k <-> i+1,j,k
                     float param_i1 = (i_alpha * vals[dest_index + Nz]) + (i_beta * vals[dest_index + NyNz + Nz]);         // i,j+1,k <-> i+1,j+1,k
@@ -388,32 +388,133 @@ void Grid::advect(float deltaT)
                     float interp_val = (k_alpha * param_ij0) + (k_beta * param_ij1);
 
                     (*parameters_new[param_idx])[base_index] = interp_val + (BODY_FORCES[param_idx] * deltaT);
-
-                    // debug
-                    if (base_index == (uint32_t)(Nx / 2 * NyNz + NyNz / 2 + Nz / 2) && param_idx == 0)
-                    {
-                        std::cout << "(i,j,k) => (" << i << ", " << j << ", " << k << ")" << std::endl;
-                        std::cout << "(x,y,z) => (" << x << ", " << y << ", " << z << ")" << std::endl;
-                        std::cout << "(i_new_f, j_new_f, k_new_f) => (" << i_new_f << ", " << j_new_f << ", " << k_new_f << ")" << std::endl;
-                        std::cout << "(i_new, j_new, k_new) => (" << i_new << ", " << j_new << ", " << k_new << ")" << std::endl;
-                        std::cout << "(i_alpha, j_alpha, k_alpha) => (" << i_alpha << ", " << j_alpha << ", " << k_alpha << ")" << std::endl;
-                        std::cout << "|phi0, phi1| = |" << vals[dest_index] << ", " << vals[dest_index + NyNz] << "|" << std::endl;
-                        std::cout << "|phi2, phi3| = |" << vals[dest_index + Nz] << ", " << vals[dest_index + NyNz + Nz] << "|" << std::endl;
-                        std::cout << "\n|phi4, phi5| = |" << vals[dest_index + 1] << ", " << vals[dest_index + NyNz + 1] << "|" << std::endl;
-                        std::cout << "|phi6, phi7| = |" << vals[dest_index + Nz + 1] << ", " << vals[dest_index + NyNz + Nz + 1] << "|" << std::endl;
-
-                        std::cout << "(param_i0, param_i1, param_i2, param_i3) => (" << param_i0 << ", " << param_i1 << ", " << param_i2 << ", " << param_i3 << ")" << std::endl;
-                        std::cout << "(param_ij0, param_ij1) => (" << param_ij0 << ", " << param_ij1 << ")" << std::endl;
-                        std::cout << "interp => " << interp_val << std::endl;
-
-                        std::cout << "(phi_old, phi_new) => (" << (*parameters_old[param_idx])[base_index] << ", " << (*parameters_new[param_idx])[base_index] << ")" << std::endl;
-                    }
                 }
             }
         }
     }
 
     std::cout << u_minus_new[(int)(Nx / 2) * NyNz + (int)(Ny / 2) * Nz + (int)(Nz / 2)] << ", " << v_minus_new[(int)(Nx / 2) * NyNz + (int)(Ny / 2) * Nz + (int)(Nz / 2)] << ", " << w_minus_new[(int)(Nx / 2) * NyNz + (int)(Ny / 2) * Nz + (int)(Nz / 2)] << std::endl;
+}
+
+void Grid::updateSOE(float deltaT)
+{
+    const std::vector<float> &phi = phi_arrays[newStorage];
+    const std::vector<float> &u_minus = u_minus_arrays[newStorage];
+    const std::vector<float> &v_minus = v_minus_arrays[newStorage];
+    const std::vector<float> &w_minus = w_minus_arrays[newStorage];
+
+    const float CONST_FACTOR = RHO * CELL_WIDTH / deltaT;
+    for (uint32_t i = 1; i < Nx - 1; i++)
+    {
+        for (uint32_t j = 1; j < Ny - 1; j++)
+        {
+            for (uint32_t k = 1; k < Nz - 1; k++)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+                if (phi[base_index] >= 0.0f) // only care about fluid cells
+                {
+                    continue;
+                }
+
+                uint32_t nonSolidNeighbors = 0;
+                float d = 0.0f;
+
+                // left neighbor
+                if (i != 1) // left neighbor is not SOLID
+                {
+                    nonSolidNeighbors++;
+                    uint32_t leftNeighbor = base_index - NyNz;
+                    if (phi[leftNeighbor] < 0.0f) // i-1,j,k: liquid = non-zero velocity
+                    {
+                        d -= u_minus[base_index];
+                        AplusI[leftNeighbor] = -1; // A(i,j,k)(i-1,j,k) = A(i-1,j,k)(i,j,k) so AplusI(i-1,j,k)
+                    }
+                    else
+                    {
+                        AplusI[leftNeighbor] = 0;
+                    }
+                }
+                // right neighbor
+                if (i != Nx - 2) // right neighbor is not SOLID
+                {
+                    nonSolidNeighbors++;
+                    uint32_t rightNeighbor = base_index + NyNz;
+                    if (phi[rightNeighbor] < 0.0f) // i+1,j,k: liquid = non-zero velocity
+                    {
+                        d += u_minus[rightNeighbor];
+                        AplusI[base_index] = -1; // A(i,j,k)(i+1,j,k) so AplusI(i,j,k)
+                    }
+                    else
+                    {
+                        AplusI[base_index] = 0;
+                    }
+                }
+                // top neighbor
+                if (j != 1) // top neighbor is not SOLID
+                {
+                    nonSolidNeighbors++;
+                    uint32_t topNeighbor = base_index - Nz;
+                    if (phi[topNeighbor] < 0.0f) // i,j-1,k: liquid = non-zero velocity
+                    {
+                        d -= v_minus[base_index];
+                        AplusJ[topNeighbor] = -1; // A(i,j,k)(i,j-1,k) = A(i,j-1,k)(i,j,k) so AplusJ(i,j-1,k)
+                    }
+                    else
+                    {
+                        AplusJ[topNeighbor] = 0;
+                    }
+                }
+                // bottom neighbor
+                if (j != Ny - 2) // bottom neighbor is not SOLID
+                {
+                    nonSolidNeighbors++;
+                    uint32_t bottomNeighbor = base_index + Nz;
+                    if (phi[bottomNeighbor] < 0.0f) // i,j+1,k: liquid = non-zero velocity
+                    {
+                        d += v_minus[bottomNeighbor];
+                        AplusJ[base_index] = -1; // A(i,j,k)(i,j+1,k) so AplusJ(i,j,k)
+                    }
+                    else
+                    {
+                        AplusJ[base_index] = 0;
+                    }
+                }
+                // front neighbor
+                if (k != 1) // front neighbor is not SOLID
+                {
+                    nonSolidNeighbors++;
+                    uint32_t frontNeighbor = base_index - 1;
+                    if (phi[frontNeighbor] < 0.0f) // i,j,k-1: liquid = non-zero velocity
+                    {
+                        d -= w_minus[base_index];
+                        AplusK[frontNeighbor] = -1; // A(i,j,k)(i,j,k-1) = A(i,j,k-1)(i,j,k) so AplusK(i,j,k-1)
+                    }
+                    else
+                    {
+                        AplusK[frontNeighbor] = 0;
+                    }
+                }
+                // back neighbor
+                if (k != Nz - 2) // back neighbor is not SOLID
+                {
+                    nonSolidNeighbors++;
+                    uint32_t backNeighbor = base_index + 1;
+                    if (phi[backNeighbor] < 0.0f) // i,j,k+1: liquid = non-zero velocity
+                    {
+                        d += w_minus[backNeighbor];
+                        AplusK[base_index] = -1; // A(i,j,k)(i,j,k+1) so AplusK(i,j,k)
+                    }
+                    else
+                    {
+                        AplusK[base_index] = 0;
+                    }
+
+                    Adiag[base_index] = nonSolidNeighbors;
+                    D[base_index] = -CONST_FACTOR * d;
+                }
+            }
+        }
+    }
 }
 
 void Grid::constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t> &indices)

@@ -94,14 +94,17 @@ void VulkanApp::mainLoop()
         auto start = std::chrono::high_resolution_clock::now();
         grid_ptr->advect(deltaT);
         auto start0 = std::chrono::high_resolution_clock::now();
-        grid_ptr->constructSurface(vertices, indices);
+        grid_ptr->updateSOE(deltaT);
         auto start1 = std::chrono::high_resolution_clock::now();
+        grid_ptr->constructSurface(vertices, indices);
+        auto start2 = std::chrono::high_resolution_clock::now();
         drawFrame();
         auto end = std::chrono::high_resolution_clock::now();
         auto duration0 = std::chrono::duration_cast<std::chrono::milliseconds>(start0 - start);
         auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(start1 - start0);
-        auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start1);
-        std::cout << duration0.count() << " ms, " << duration1.count() << " ms, " << duration2.count() << " ms" << std::endl;
+        auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(start2 - start1);
+        auto duration3 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start2);
+        std::cout << duration0.count() << " ms, " << duration1.count() << " ms, " << duration2.count() << " ms, " << duration3.count() << " ms" << std::endl;
         usleep(1000); // sleep for 1ms
 
         auto total = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
