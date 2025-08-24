@@ -3,9 +3,9 @@
 #include <iostream>
 #include <algorithm>
 
-constexpr uint32_t Nx = 200;
-constexpr uint32_t Ny = 200;
-constexpr uint32_t Nz = 200;
+constexpr uint32_t Nx = 40;
+constexpr uint32_t Ny = 40;
+constexpr uint32_t Nz = 40;
 constexpr uint32_t NyNz = Ny * Nz;
 constexpr float CELL_WIDTH = 10.0f / (float)Nx;
 constexpr float INV_CELL_WIDTH = 1.0f / CELL_WIDTH;
@@ -13,6 +13,7 @@ constexpr glm::vec3 SURFACE_COLOR = {1.0f, 1.0f, 1.0f};
 constexpr glm::vec3 globalOffset = {-(Nx * CELL_WIDTH) / 2.0f, -(Ny *CELL_WIDTH) / 2.0f, -(Nz *CELL_WIDTH) / 2.0f};
 constexpr std::array<float, 4> BODY_FORCES = {0.0f, 0.0f, 0.1f, 0.0f}; // gravity
 constexpr float RHO = 1000.0f;
+constexpr uint32_t MAX_ITERATIONS = 100;
 
 #define Triple std::array<uint32_t, 3>
 #define MarchingCube std::vector<Triple>
@@ -290,6 +291,11 @@ Grid::Grid()
     AplusJ.resize(Nx * Ny * Nz);
     AplusK.resize(Nx * Ny * Nz);
     D.resize(Nx * Ny * Nz);
+    pressures.resize(Nx * Ny * Nz);
+
+    // solver:
+    residuals.resize(Nx * Ny * Nz);
+    conjugates.resize(Nx * Ny * Nz);
 
     // add sphere
     float radius = 4.0f;
@@ -392,8 +398,6 @@ void Grid::advect(float deltaT)
             }
         }
     }
-
-    std::cout << u_minus_new[(int)(Nx / 2) * NyNz + (int)(Ny / 2) * Nz + (int)(Nz / 2)] << ", " << v_minus_new[(int)(Nx / 2) * NyNz + (int)(Ny / 2) * Nz + (int)(Nz / 2)] << ", " << w_minus_new[(int)(Nx / 2) * NyNz + (int)(Ny / 2) * Nz + (int)(Nz / 2)] << std::endl;
 }
 
 void Grid::updateSOE(float deltaT)
@@ -404,6 +408,7 @@ void Grid::updateSOE(float deltaT)
     const std::vector<float> &w_minus = w_minus_arrays[newStorage];
 
     const float CONST_FACTOR = RHO * CELL_WIDTH / deltaT;
+
     for (uint32_t i = 1; i < Nx - 1; i++)
     {
         for (uint32_t j = 1; j < Ny - 1; j++)
@@ -413,6 +418,7 @@ void Grid::updateSOE(float deltaT)
                 uint32_t base_index = i * NyNz + j * Nz + k;
                 if (phi[base_index] >= 0.0f) // only care about fluid cells
                 {
+                    D[base_index] = 0.0f;
                     continue;
                 }
 
@@ -508,10 +514,164 @@ void Grid::updateSOE(float deltaT)
                     {
                         AplusK[base_index] = 0;
                     }
-
-                    Adiag[base_index] = nonSolidNeighbors;
-                    D[base_index] = -CONST_FACTOR * d;
                 }
+
+                Adiag[base_index] = nonSolidNeighbors;
+                D[base_index] = -CONST_FACTOR * d;
+            }
+        }
+    }
+}
+
+void Grid::solveSOE()
+{
+    // Conjugate Gradient Algorithm
+    uint32_t iterations = 0;
+    float r_dot_r = 0.0f;
+
+    std::vector<float> tmp0 = std::vector<float>(Nx * Ny * Nz);
+
+    mulA(pressures, tmp0);
+    sumC(D, tmp0, -1.0f, residuals); // r = D - A*pressure
+
+    r_dot_r = dot(residuals, residuals); // r_dot_r = r*r
+    conjugates = residuals;              // p = r
+    std::cout << "(" << iterations << ") R^2 = " << r_dot_r << std::endl;
+
+    while (iterations < MAX_ITERATIONS)
+    {
+        mulA(conjugates, tmp0); // tmp0 = A*p
+
+        float alpha = r_dot_r / dot(conjugates, tmp0); // alpha = r*r / (p*A*p)
+
+        sumC(pressures, conjugates, alpha, pressures); // pressure += alpha*p
+        sumC(residuals, tmp0, -alpha, residuals);      // r -= alpha*Ap
+
+        float new_r_dot_r = dot(residuals, residuals);
+        float beta = new_r_dot_r / r_dot_r;
+        r_dot_r = new_r_dot_r;
+
+        sumC(residuals, conjugates, beta, conjugates);
+
+        iterations++;
+        std::cout << "(" << iterations << ") R^2/cell = " << r_dot_r / (Nx * NyNz) << std::endl;
+        if (r_dot_r / (Nx * NyNz) < 1e-6)
+        {
+            break;
+        }
+    }
+
+    float max_p = 0.0f;
+    for (uint32_t idx = 0; idx < Nx * NyNz; idx++)
+    {
+        if (pressures[idx] > max_p)
+        {
+            max_p = pressures[idx];
+        }
+    }
+    std::cout << "Max pressure: " << max_p << std::endl;
+}
+
+void Grid::mulA(const std::vector<float> &x, std::vector<float> &result)
+{
+    const std::vector<float> &phi = phi_arrays[newStorage];
+
+    float sum = 0.0f;
+    for (uint32_t i = 0; i < Nx; i++)
+    {
+        for (uint32_t j = 0; j < Ny; j++)
+        {
+            for (uint32_t k = 0; k < Nz; k++)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+                if (phi[base_index] > 0.0f) // row in A matrix is all zeros if non-fluid
+                {
+                    result[base_index] = 0.0f;
+                    continue;
+                }
+                float val = 0.0f;
+                val += Adiag[base_index] * x[base_index];
+                val += AplusI[base_index] * x[base_index + NyNz];
+                val += AplusJ[base_index] * x[base_index + Nz];
+                val += AplusK[base_index] * x[base_index + 1];
+                val += AplusI[base_index - NyNz] * x[base_index - NyNz];
+                val += AplusJ[base_index - Nz] * x[base_index - Nz];
+                val += AplusK[base_index - 1] * x[base_index - 1];
+                result[base_index] = val;
+                sum += val;
+            }
+        }
+    }
+    // std::cout << "DEBUG MUL: " << sum << std::endl;
+}
+
+void Grid::sumC(const std::vector<float> &a, const std::vector<float> &b, float C, std::vector<float> &result)
+{
+    float sum = 0.0f;
+    for (uint32_t i = 0; i < Nx; i++)
+    {
+        for (uint32_t j = 0; j < Ny; j++)
+        {
+            for (uint32_t k = 0; k < Nz; k++)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+                result[base_index] = a[base_index] + b[base_index] * C;
+                sum += result[base_index];
+                // if (std::isnan(result[base_index]))
+                // {
+                //     std::cout << "{" << i << ", " << j << ", " << k << "}: " << a[base_index] << std::endl;
+                // }
+            }
+        }
+    }
+    // std::cout << "DEBUG SUMC: " << sum << std::endl;
+}
+
+float Grid::dot(const std::vector<float> &a, const std::vector<float> &b)
+{
+    float tmpResult = 0.0f;
+    for (uint32_t i = 0; i < Nx; i++)
+    {
+        for (uint32_t j = 0; j < Ny; j++)
+        {
+            for (uint32_t k = 0; k < Nz; k++)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+                tmpResult += a[base_index] * b[base_index];
+            }
+        }
+    }
+    return tmpResult;
+}
+
+void Grid::project(float deltaT)
+{
+    std::vector<float> &phi = phi_arrays[newStorage];
+    std::vector<float> &u_minus_new = u_minus_arrays[newStorage];
+    std::vector<float> &v_minus_new = v_minus_arrays[newStorage];
+    std::vector<float> &w_minus_new = w_minus_arrays[newStorage];
+
+    float CONST_FACTOR = deltaT / (RHO * CELL_WIDTH);
+    for (uint32_t i = 1; i < Nx; i++)
+    {
+        for (uint32_t j = 1; j < Ny; j++)
+        {
+            for (uint32_t k = 1; k < Nz; k++)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+
+                // if (phi[base_index] > 0.0f)
+                // {
+                //     u_minus_new[base_index] = 0.0f;
+                //     v_minus_new[base_index] = 0.0f;
+                //     w_minus_new[base_index] = 0.0f;
+                // }
+                // else
+                // {
+                u_minus_new[base_index] -= CONST_FACTOR * (pressures[base_index] - pressures[base_index - NyNz]);
+                v_minus_new[base_index] -= CONST_FACTOR * (pressures[base_index] - pressures[base_index - Nz]);
+                w_minus_new[base_index] -= CONST_FACTOR * (pressures[base_index] - pressures[base_index - 1]);
+                // }
             }
         }
     }
