@@ -14,8 +14,9 @@ public:
     void updateSOE(float deltaT);
     void solveSOE();
     void project(float deltaT);
+    void smoothSurface();
     void constructSurface(std::vector<Vertex> &vertices, std::vector<uint32_t> &indices);
-    void flipStorage();
+    inline float updatePhi(uint32_t base_index, float old_phi, const std::array<float, 6> &neighbor_phis);
 
 private:
     std::array<std::vector<float>, 2> phi_arrays;
@@ -33,6 +34,8 @@ private:
 
     uint32_t oldStorage = 0;
     uint32_t newStorage = 1;
+
+    void flipStorage();
 
     // SOE Solver variables:
     std::vector<float> residuals;

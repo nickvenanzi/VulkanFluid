@@ -3,9 +3,9 @@
 #include <iostream>
 #include <algorithm>
 
-constexpr uint32_t Nx = 40;
-constexpr uint32_t Ny = 40;
-constexpr uint32_t Nz = 40;
+constexpr uint32_t Nx = 10;
+constexpr uint32_t Ny = 10;
+constexpr uint32_t Nz = 10;
 constexpr uint32_t NyNz = Ny * Nz;
 constexpr float CELL_WIDTH = 10.0f / (float)Nx;
 constexpr float INV_CELL_WIDTH = 1.0f / CELL_WIDTH;
@@ -298,8 +298,10 @@ Grid::Grid()
     conjugates.resize(Nx * Ny * Nz);
 
     // add sphere
-    float radius = 4.0f;
-    glm::vec3 center = {0.0f, 0.0f, 0.0f};
+    float radius = 3.0f;
+    float sphereHeight = 5.0f;
+    glm::vec3 center = {0.0f, 5.0f - sphereHeight, 0.0f};
+    float poolHeight = 2.0f;
     uint32_t index = 0;
     for (uint32_t i = 0; i < Nx; i++)
     {
@@ -309,8 +311,11 @@ Grid::Grid()
             {
                 glm::vec3 position = getPosition(i, j, k);
                 float distance = std::sqrt((position.x - center.x) * (position.x - center.x) + (position.y - center.y) * (position.y - center.y) + (position.z - center.z) * (position.z - center.z)) - radius;
-                phi_arrays[oldStorage][index] = distance;
-                phi_arrays[newStorage][index] = distance;
+                // float distance2 = (10.0f - poolHeight) - j * CELL_WIDTH;
+                float distance2 = distance;
+
+                phi_arrays[oldStorage][index] = std::abs(distance) < std::abs(distance2) ? distance : distance2;
+                phi_arrays[newStorage][index] = std::abs(distance) < std::abs(distance2) ? distance : distance2;
 
                 index += 1;
             }
@@ -325,6 +330,7 @@ inline glm::vec3 Grid::getPosition(uint32_t x_i, uint32_t y_i, uint32_t z_i)
 
 void Grid::advect(float deltaT)
 {
+    flipStorage();
     const std::vector<float> &phi_old = phi_arrays[oldStorage];
     const std::vector<float> &u_minus_old = u_minus_arrays[oldStorage];
     const std::vector<float> &v_minus_old = v_minus_arrays[oldStorage];
@@ -418,6 +424,7 @@ void Grid::updateSOE(float deltaT)
                 uint32_t base_index = i * NyNz + j * Nz + k;
                 if (phi[base_index] >= 0.0f) // only care about fluid cells
                 {
+                    Adiag[base_index] = 0;
                     D[base_index] = 0.0f;
                     continue;
                 }
@@ -430,90 +437,48 @@ void Grid::updateSOE(float deltaT)
                 {
                     nonSolidNeighbors++;
                     uint32_t leftNeighbor = base_index - NyNz;
-                    if (phi[leftNeighbor] < 0.0f) // i-1,j,k: liquid = non-zero velocity
-                    {
-                        d -= u_minus[base_index];
-                        AplusI[leftNeighbor] = -1; // A(i,j,k)(i-1,j,k) = A(i-1,j,k)(i,j,k) so AplusI(i-1,j,k)
-                    }
-                    else
-                    {
-                        AplusI[leftNeighbor] = 0;
-                    }
+                    d -= u_minus[base_index];
+                    AplusI[leftNeighbor] = phi[leftNeighbor] < 0.0f ? -1 : 0; // A(i,j,k)(i-1,j,k) = A(i-1,j,k)(i,j,k) so AplusI(i-1,j,k)
                 }
                 // right neighbor
                 if (i != Nx - 2) // right neighbor is not SOLID
                 {
                     nonSolidNeighbors++;
                     uint32_t rightNeighbor = base_index + NyNz;
-                    if (phi[rightNeighbor] < 0.0f) // i+1,j,k: liquid = non-zero velocity
-                    {
-                        d += u_minus[rightNeighbor];
-                        AplusI[base_index] = -1; // A(i,j,k)(i+1,j,k) so AplusI(i,j,k)
-                    }
-                    else
-                    {
-                        AplusI[base_index] = 0;
-                    }
+                    d += u_minus[rightNeighbor];
+                    AplusI[base_index] = phi[rightNeighbor] < 0.0f ? -1 : 0; // A(i,j,k)(i+1,j,k) so AplusI(i,j,k)
                 }
                 // top neighbor
                 if (j != 1) // top neighbor is not SOLID
                 {
                     nonSolidNeighbors++;
                     uint32_t topNeighbor = base_index - Nz;
-                    if (phi[topNeighbor] < 0.0f) // i,j-1,k: liquid = non-zero velocity
-                    {
-                        d -= v_minus[base_index];
-                        AplusJ[topNeighbor] = -1; // A(i,j,k)(i,j-1,k) = A(i,j-1,k)(i,j,k) so AplusJ(i,j-1,k)
-                    }
-                    else
-                    {
-                        AplusJ[topNeighbor] = 0;
-                    }
+                    d -= v_minus[base_index];
+                    AplusJ[topNeighbor] = phi[topNeighbor] < 0.0f ? -1 : 0; // A(i,j,k)(i,j-1,k) = A(i,j-1,k)(i,j,k) so AplusJ(i,j-1,k)
                 }
                 // bottom neighbor
                 if (j != Ny - 2) // bottom neighbor is not SOLID
                 {
                     nonSolidNeighbors++;
                     uint32_t bottomNeighbor = base_index + Nz;
-                    if (phi[bottomNeighbor] < 0.0f) // i,j+1,k: liquid = non-zero velocity
-                    {
-                        d += v_minus[bottomNeighbor];
-                        AplusJ[base_index] = -1; // A(i,j,k)(i,j+1,k) so AplusJ(i,j,k)
-                    }
-                    else
-                    {
-                        AplusJ[base_index] = 0;
-                    }
+                    d += v_minus[bottomNeighbor];
+                    AplusJ[base_index] = phi[bottomNeighbor] < 0.0f ? -1 : 0; // A(i,j,k)(i,j+1,k) so AplusJ(i,j,k)
                 }
                 // front neighbor
                 if (k != 1) // front neighbor is not SOLID
                 {
                     nonSolidNeighbors++;
                     uint32_t frontNeighbor = base_index - 1;
-                    if (phi[frontNeighbor] < 0.0f) // i,j,k-1: liquid = non-zero velocity
-                    {
-                        d -= w_minus[base_index];
-                        AplusK[frontNeighbor] = -1; // A(i,j,k)(i,j,k-1) = A(i,j,k-1)(i,j,k) so AplusK(i,j,k-1)
-                    }
-                    else
-                    {
-                        AplusK[frontNeighbor] = 0;
-                    }
+                    d -= w_minus[base_index];
+                    AplusK[frontNeighbor] = phi[frontNeighbor] < 0.0f ? -1 : 0; // A(i,j,k)(i,j,k-1) = A(i,j,k-1)(i,j,k) so AplusK(i,j,k-1)
                 }
                 // back neighbor
                 if (k != Nz - 2) // back neighbor is not SOLID
                 {
                     nonSolidNeighbors++;
                     uint32_t backNeighbor = base_index + 1;
-                    if (phi[backNeighbor] < 0.0f) // i,j,k+1: liquid = non-zero velocity
-                    {
-                        d += w_minus[backNeighbor];
-                        AplusK[base_index] = -1; // A(i,j,k)(i,j,k+1) so AplusK(i,j,k)
-                    }
-                    else
-                    {
-                        AplusK[base_index] = 0;
-                    }
+                    d += w_minus[backNeighbor];
+                    AplusK[base_index] = phi[backNeighbor] < 0.0f ? -1 : 0; // A(i,j,k)(i,j,k+1) so AplusK(i,j,k)
                 }
 
                 Adiag[base_index] = nonSolidNeighbors;
@@ -538,7 +503,7 @@ void Grid::solveSOE()
     conjugates = residuals;              // p = r
     std::cout << "(" << iterations << ") R^2 = " << r_dot_r << std::endl;
 
-    while (iterations < MAX_ITERATIONS)
+    while ((r_dot_r / (Nx * NyNz) > 1e-6) && iterations < MAX_ITERATIONS)
     {
         mulA(conjugates, tmp0); // tmp0 = A*p
 
@@ -555,10 +520,6 @@ void Grid::solveSOE()
 
         iterations++;
         std::cout << "(" << iterations << ") R^2/cell = " << r_dot_r / (Nx * NyNz) << std::endl;
-        if (r_dot_r / (Nx * NyNz) < 1e-6)
-        {
-            break;
-        }
     }
 
     float max_p = 0.0f;
@@ -569,19 +530,16 @@ void Grid::solveSOE()
             max_p = pressures[idx];
         }
     }
-    std::cout << "Max pressure: " << max_p << std::endl;
 }
 
 void Grid::mulA(const std::vector<float> &x, std::vector<float> &result)
 {
     const std::vector<float> &phi = phi_arrays[newStorage];
-
-    float sum = 0.0f;
-    for (uint32_t i = 0; i < Nx; i++)
+    for (uint32_t i = 1; i < Nx - 1; i++)
     {
-        for (uint32_t j = 0; j < Ny; j++)
+        for (uint32_t j = 1; j < Ny - 1; j++)
         {
-            for (uint32_t k = 0; k < Nz; k++)
+            for (uint32_t k = 1; k < Nz - 1; k++)
             {
                 uint32_t base_index = i * NyNz + j * Nz + k;
                 if (phi[base_index] > 0.0f) // row in A matrix is all zeros if non-fluid
@@ -597,12 +555,23 @@ void Grid::mulA(const std::vector<float> &x, std::vector<float> &result)
                 val += AplusI[base_index - NyNz] * x[base_index - NyNz];
                 val += AplusJ[base_index - Nz] * x[base_index - Nz];
                 val += AplusK[base_index - 1] * x[base_index - 1];
+                if (std::isnan(val) || std::isinf(val) || std::isinf(-val))
+                {
+                    std::cout << "i,j,k: " << i << ", " << j << ", " << k << std::endl;
+                    std::cout << "x[base]: " << x[base_index] << std::endl;
+                    std::cout << "x[base + i]: " << x[base_index + NyNz] << std::endl;
+                    std::cout << "x[base + j]: " << x[base_index + Nz] << std::endl;
+                    std::cout << "x[base + k]: " << x[base_index + 1] << std::endl;
+                    std::cout << "x[base - i]: " << x[base_index - NyNz] << std::endl;
+                    std::cout << "x[base - j]: " << x[base_index - Nz] << std::endl;
+                    std::cout << "x[base - k]: " << x[base_index - 1] << std::endl;
+                    std::cout << "result: " << val << std::endl;
+                    std::abort();
+                }
                 result[base_index] = val;
-                sum += val;
             }
         }
     }
-    // std::cout << "DEBUG MUL: " << sum << std::endl;
 }
 
 void Grid::sumC(const std::vector<float> &a, const std::vector<float> &b, float C, std::vector<float> &result)
@@ -660,20 +629,260 @@ void Grid::project(float deltaT)
             {
                 uint32_t base_index = i * NyNz + j * Nz + k;
 
-                // if (phi[base_index] > 0.0f)
-                // {
-                //     u_minus_new[base_index] = 0.0f;
-                //     v_minus_new[base_index] = 0.0f;
-                //     w_minus_new[base_index] = 0.0f;
-                // }
-                // else
-                // {
                 u_minus_new[base_index] -= CONST_FACTOR * (pressures[base_index] - pressures[base_index - NyNz]);
                 v_minus_new[base_index] -= CONST_FACTOR * (pressures[base_index] - pressures[base_index - Nz]);
                 w_minus_new[base_index] -= CONST_FACTOR * (pressures[base_index] - pressures[base_index - 1]);
-                // }
             }
         }
+    }
+}
+
+void Grid::smoothSurface()
+{
+    flipStorage();
+
+    std::vector<float> &phi_old = phi_arrays[oldStorage];
+    std::vector<float> &u_minus_old = u_minus_arrays[oldStorage];
+    std::vector<float> &v_minus_old = v_minus_arrays[oldStorage];
+    std::vector<float> &w_minus_old = w_minus_arrays[oldStorage];
+
+    std::vector<float> &phi_new = phi_arrays[newStorage];
+    std::vector<float> &u_minus_new = u_minus_arrays[newStorage];
+    std::vector<float> &v_minus_new = v_minus_arrays[newStorage];
+    std::vector<float> &w_minus_new = w_minus_arrays[newStorage];
+
+    std::array<float, 6> neighbor_phis;
+    for (uint32_t i = 1; i < Nx - 1; i++)
+    {
+        for (uint32_t j = 1; j < Ny - 1; j++)
+        {
+            for (uint32_t k = 1; k < Nz - 1; k++)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+                float old_phi = phi_old[base_index];
+
+                neighbor_phis[0] = phi_old[base_index - NyNz];
+                neighbor_phis[1] = phi_old[base_index - Nz];
+                neighbor_phis[2] = phi_old[base_index - 1];
+                neighbor_phis[3] = phi_old[base_index + NyNz];
+                neighbor_phis[4] = phi_old[base_index + Nz];
+                neighbor_phis[5] = phi_old[base_index + 1];
+
+                phi_new[base_index] = updatePhi(base_index, old_phi, neighbor_phis);
+
+                if (phi_new[base_index] > 0.0f)
+                {
+                    float max_u = 0, max_v = 0, max_w = 0;
+                    std::array<uint32_t, 3> neighbors = {base_index - NyNz, base_index - Nz, base_index - 1};
+                    for (uint32_t neighbor : neighbors)
+                    {
+                        if (abs(u_minus_new[neighbor]) > abs(max_u))
+                        {
+                            max_u = u_minus_new[neighbor];
+                        }
+                        if (abs(v_minus_new[neighbor]) > abs(max_v))
+                        {
+                            max_v = v_minus_new[neighbor];
+                        }
+                        if (abs(w_minus_new[neighbor]) > abs(max_w))
+                        {
+                            max_w = w_minus_new[neighbor];
+                        }
+                    }
+                    u_minus_new[base_index] = max_u;
+                    v_minus_new[base_index] = max_v;
+                    w_minus_new[base_index] = max_w;
+                }
+                else
+                {
+                    u_minus_new[base_index] = u_minus_old[base_index];
+                    v_minus_new[base_index] = v_minus_old[base_index];
+                    w_minus_new[base_index] = w_minus_old[base_index];
+                }
+            }
+        }
+    }
+
+    flipStorage();
+
+    phi_old = phi_arrays[oldStorage];
+    u_minus_old = u_minus_arrays[oldStorage];
+    v_minus_old = v_minus_arrays[oldStorage];
+    w_minus_old = w_minus_arrays[oldStorage];
+
+    phi_new = phi_arrays[newStorage];
+    u_minus_new = u_minus_arrays[newStorage];
+    v_minus_new = v_minus_arrays[newStorage];
+    w_minus_new = w_minus_arrays[newStorage];
+
+    for (uint32_t i = Nx - 2; i > 0; i--)
+    {
+        for (uint32_t j = Ny - 2; j > 0; j--)
+        {
+            for (uint32_t k = Nz - 2; k > 0; k--)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+                float old_phi = phi_old[base_index];
+
+                neighbor_phis[0] = phi_old[base_index - NyNz];
+                neighbor_phis[1] = phi_old[base_index - Nz];
+                neighbor_phis[2] = phi_old[base_index - 1];
+                neighbor_phis[3] = phi_old[base_index + NyNz];
+                neighbor_phis[4] = phi_old[base_index + Nz];
+                neighbor_phis[5] = phi_old[base_index + 1];
+
+                phi_new[base_index] = updatePhi(base_index, old_phi, neighbor_phis);
+
+                if (phi_new[base_index] > 0.0f)
+                {
+                    float max_u = 0, max_v = 0, max_w = 0;
+                    std::array<uint32_t, 3> neighbors = {base_index + NyNz, base_index + Nz, base_index + 1};
+                    for (uint32_t neighbor : neighbors)
+                    {
+                        if (abs(u_minus_new[neighbor]) > abs(max_u))
+                        {
+                            max_u = u_minus_new[neighbor];
+                        }
+                        if (abs(v_minus_new[neighbor]) > abs(max_v))
+                        {
+                            max_v = v_minus_new[neighbor];
+                        }
+                        if (abs(w_minus_new[neighbor]) > abs(max_w))
+                        {
+                            max_w = w_minus_new[neighbor];
+                        }
+                    }
+                    u_minus_new[base_index] = max_u;
+                    v_minus_new[base_index] = max_v;
+                    w_minus_new[base_index] = max_w;
+                }
+                else
+                {
+                    u_minus_new[base_index] = u_minus_old[base_index];
+                    v_minus_new[base_index] = v_minus_old[base_index];
+                    w_minus_new[base_index] = w_minus_old[base_index];
+                }
+            }
+        }
+    }
+
+    flipStorage();
+
+    phi_old = phi_arrays[oldStorage];
+    u_minus_old = u_minus_arrays[oldStorage];
+    v_minus_old = v_minus_arrays[oldStorage];
+    w_minus_old = w_minus_arrays[oldStorage];
+
+    phi_new = phi_arrays[newStorage];
+    u_minus_new = u_minus_arrays[newStorage];
+    v_minus_new = v_minus_arrays[newStorage];
+    w_minus_new = w_minus_arrays[newStorage];
+
+    for (uint32_t i = Nx - 2; i > 0; i--)
+    {
+        for (uint32_t j = Ny - 2; j > 0; j--)
+        {
+            for (uint32_t k = Nz - 2; k > 0; k--)
+            {
+                uint32_t base_index = i * NyNz + j * Nz + k;
+                float old_phi = phi_old[base_index];
+
+                neighbor_phis[0] = phi_old[base_index - NyNz];
+                neighbor_phis[1] = phi_old[base_index - Nz];
+                neighbor_phis[2] = phi_old[base_index - 1];
+                neighbor_phis[3] = phi_old[base_index + NyNz];
+                neighbor_phis[4] = phi_old[base_index + Nz];
+                neighbor_phis[5] = phi_old[base_index + 1];
+
+                phi_new[base_index] = updatePhi(base_index, old_phi, neighbor_phis);
+
+                if (phi_new[base_index] > 0.0f)
+                {
+                    float max_u = 0, max_v = 0, max_w = 0;
+                    std::array<uint32_t, 3> neighbors = {base_index + NyNz, base_index + Nz, base_index + 1};
+                    for (uint32_t neighbor : neighbors)
+                    {
+                        if (abs(u_minus_new[neighbor]) > abs(max_u))
+                        {
+                            max_u = u_minus_new[neighbor];
+                        }
+                        if (abs(v_minus_new[neighbor]) > abs(max_v))
+                        {
+                            max_v = v_minus_new[neighbor];
+                        }
+                        if (abs(w_minus_new[neighbor]) > abs(max_w))
+                        {
+                            max_w = w_minus_new[neighbor];
+                        }
+                    }
+                    u_minus_new[base_index] = max_u;
+                    v_minus_new[base_index] = max_v;
+                    w_minus_new[base_index] = max_w;
+                }
+                else
+                {
+                    u_minus_new[base_index] = u_minus_old[base_index];
+                    v_minus_new[base_index] = v_minus_old[base_index];
+                    w_minus_new[base_index] = w_minus_old[base_index];
+                }
+            }
+        }
+    }
+}
+
+inline float Grid::updatePhi(uint32_t base_index, float old_phi, const std::array<float, 6> &neighbor_phis)
+{
+    float a1 = MAXFLOAT, a2 = MAXFLOAT, a3 = MAXFLOAT;
+    if (abs(old_phi) < CELL_WIDTH)
+    {
+        return old_phi;
+    }
+    bool positive = old_phi > 0.0f;
+
+    for (float neighbor_phi : neighbor_phis)
+    {
+        if (abs(neighbor_phi) < a1)
+        {
+            a3 = a2;
+            a2 = a1;
+            a1 = abs(neighbor_phi);
+        }
+        else if (abs(neighbor_phi) < a2)
+        {
+            a3 = a2;
+            a2 = abs(neighbor_phi);
+        }
+        else if (abs(neighbor_phi) < a3)
+        {
+            a3 = abs(neighbor_phi);
+        }
+    }
+
+    float determinant2 = 2 * CELL_WIDTH * CELL_WIDTH - (a1 - a2) * (a1 - a2);
+    float determinant3 = 3 * CELL_WIDTH * CELL_WIDTH - (a1 - a2) * (a1 - a2) - (a1 - a3) * (a1 - a3) - (a2 - a3) * (a2 - a3);
+
+    float resultant2 = determinant2 > 0.f ? std::sqrt(determinant2) : 0.f;
+    float resultant3 = determinant3 > 0.f ? std::sqrt(determinant3) : 0.f;
+
+    float s1 = a1 + CELL_WIDTH;
+    float s2 = (a1 + a2 + resultant2) / 2.f;
+    float s3 = (a1 + a2 + a3 + resultant3) / 3.f;
+
+    if (abs(s1) > abs(old_phi))
+    {
+        return old_phi;
+    }
+    else if (abs(s1) < a2)
+    {
+        return positive ? s1 : -s1;
+    }
+    else if (abs(s2) < a3)
+    {
+        return positive ? s2 : -s2;
+    }
+    else
+    {
+        return positive ? s3 : -s3;
     }
 }
 

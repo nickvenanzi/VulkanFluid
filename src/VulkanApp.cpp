@@ -99,22 +99,24 @@ void VulkanApp::mainLoop()
         grid_ptr->solveSOE();
         grid_ptr->project(deltaT);
         auto start2 = std::chrono::high_resolution_clock::now();
-        grid_ptr->constructSurface(vertices, indices);
+        // grid_ptr->smoothSurface();
         auto start3 = std::chrono::high_resolution_clock::now();
+        grid_ptr->constructSurface(vertices, indices);
+        auto start4 = std::chrono::high_resolution_clock::now();
         drawFrame();
         auto end = std::chrono::high_resolution_clock::now();
         auto duration0 = std::chrono::duration_cast<std::chrono::milliseconds>(start0 - start);
         auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(start1 - start0);
         auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(start2 - start1);
         auto duration3 = std::chrono::duration_cast<std::chrono::milliseconds>(start3 - start2);
-        auto duration4 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start3);
-        std::cout << duration0.count() << " ms, " << duration1.count() << " ms, " << duration2.count() << " ms, " << duration3.count() << " ms, " << duration4.count() << " ms" << std::endl;
+        auto duration4 = std::chrono::duration_cast<std::chrono::milliseconds>(start4 - start3);
+        auto duration5 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start4);
+        std::cout << duration0.count() << " ms, " << duration1.count() << " ms, " << duration2.count() << " ms, " << duration3.count() << " ms, " << duration4.count() << " ms, " << duration5.count() << " ms" << std::endl;
         usleep(1000); // sleep for 1ms
 
         auto total = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        deltaT = total.count() / 1000.0f; // seconds
+        deltaT = std::max(total.count() / 1000.0f, 0.001f); // seconds
         std::cout << "DeltaT = " << deltaT << " s" << std::endl;
-        grid_ptr->flipStorage();
     }
     vkDeviceWaitIdle(device);
 }

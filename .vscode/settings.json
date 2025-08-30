@@ -51,6 +51,7 @@
         "typeinfo": "cpp",
         "atomic": "cpp",
         "bit": "cpp",
-        "cstdarg": "cpp"
+        "cstdarg": "cpp",
+        "newfile": "cpp"
     }
 }
